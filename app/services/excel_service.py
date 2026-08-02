@@ -103,20 +103,14 @@ class ExcelService:
 
     def find_by_protocol(self, protocol):
 
-        protocol = str(protocol).strip()
+        protocol = str(protocol).strip().lower()
 
 
         for record in self.records:
 
-            excel_protocol = str(
-                record.protocol
-            ).strip()
+            excel_protocol = str(record.protocol).strip().lower()
 
-
-            number = excel_protocol.split("/")[0]
-
-
-            if number == protocol:
+            if excel_protocol.startswith(protocol):
 
                 return record
 
