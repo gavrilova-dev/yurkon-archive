@@ -1,7 +1,5 @@
 from app.services.file_watcher import FileWatcher
 
-from pathlib import Path
-
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -9,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QMessageBox,
+    QInputDialog,
 )
 
 from app.config import (
@@ -24,27 +23,43 @@ from app.file_manager import FileManager
 class MainWindow(QWidget):
 
     def __init__(self):
+
         super().__init__()
 
-        self.setWindowTitle("YURKON Archive")
-        self.resize(500, 320)
+        self.setWindowTitle(
+            "YURKON Archive"
+        )
 
-        self.excel = ExcelService(EXCEL_PATH)
+        self.resize(
+            500,
+            320
+        )
+
+
+        self.excel = ExcelService(
+            EXCEL_PATH
+        )
+
         self.excel.load()
+
 
         self.file_manager = FileManager(
             INCOMING_FOLDER,
             READY_FOLDER
         )
 
+
         self.current_pdf = None
         self.current_record = None
 
 
-        self.file_label = QLabel("Файл: нет")
+        self.file_label = QLabel(
+            "Файл: нет"
+        )
 
 
         self.protocol_edit = QLineEdit()
+
         self.protocol_edit.setPlaceholderText(
             "Введите номер протокола"
         )
@@ -55,29 +70,55 @@ class MainWindow(QWidget):
         )
 
 
-        self.organization_label = QLabel("")
+        self.organization_label = QLabel(
+            ""
+        )
 
 
-        self.index_label = QLabel("")
+        self.index_label = QLabel(
+            ""
+        )
 
 
         self.rename_button = QPushButton(
             "Переименовать"
         )
 
-        self.rename_button.setEnabled(False)
+        self.rename_button.setEnabled(
+            False
+        )
 
 
         layout = QVBoxLayout()
 
-        layout.addWidget(self.file_label)
-        layout.addWidget(self.protocol_edit)
-        layout.addWidget(self.find_button)
-        layout.addWidget(self.organization_label)
-        layout.addWidget(self.index_label)
-        layout.addWidget(self.rename_button)
+        layout.addWidget(
+            self.file_label
+        )
 
-        self.setLayout(layout)
+        layout.addWidget(
+            self.protocol_edit
+        )
+
+        layout.addWidget(
+            self.find_button
+        )
+
+        layout.addWidget(
+            self.organization_label
+        )
+
+        layout.addWidget(
+            self.index_label
+        )
+
+        layout.addWidget(
+            self.rename_button
+        )
+
+
+        self.setLayout(
+            layout
+        )
 
 
         self.find_button.clicked.connect(
@@ -97,13 +138,13 @@ class MainWindow(QWidget):
 
         self.load_first_pdf()
 
+
         self.watcher = FileWatcher(
             INCOMING_FOLDER,
             self.load_first_pdf
         )
 
         self.watcher.start()
-
 
 
     def load_first_pdf(self):
@@ -131,18 +172,30 @@ class MainWindow(QWidget):
         )
 
 
-
     def find_protocol(self):
 
-        protocol = self.protocol_edit.text().strip()
+        protocol = (
+            self.protocol_edit.text().strip()
+        )
 
 
-        record = self.excel.find_by_protocol(
+        if not protocol:
+
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "Введите номер протокола."
+            )
+
+            return
+
+
+        result = self.excel.find_by_protocol(
             protocol
         )
 
 
-        if record is None:
+        if result is None:
 
             QMessageBox.warning(
                 self,
@@ -159,24 +212,70 @@ class MainWindow(QWidget):
             return
 
 
+        # Если найдено несколько совпадений
+        if isinstance(result, list):
+
+            items = []
+
+
+            for record in result:
+
+                items.append(
+                    f"{record.protocol} — "
+                    f"{record.organization}"
+                )
+
+
+            selected, ok = QInputDialog.getItem(
+                self,
+                "Найдено несколько протоколов",
+                "Выберите нужную контору:",
+                items,
+                0,
+                False
+            )
+
+
+            if not ok:
+
+                return
+
+
+            selected_index = items.index(
+                selected
+            )
+
+
+            record = result[
+                selected_index
+            ]
+
+
+        else:
+
+            record = result
+
 
         self.current_record = record
 
 
         self.organization_label.setText(
-            f"Организация:\n{record.organization}"
+            f"Организация:\n"
+            f"{record.organization}"
         )
 
 
         self.index_label.setText(
-            f"Индекс дела:\n{record.index}"
+            f"Протокол:\n"
+            f"{record.protocol}\n\n"
+            f"Индекс дела:\n"
+            f"{record.index}"
         )
 
 
         self.rename_button.setEnabled(
             True
         )
-
 
 
     def rename_file(self):
@@ -192,7 +291,6 @@ class MainWindow(QWidget):
             return
 
 
-
         if self.current_record is None:
 
             QMessageBox.warning(
@@ -204,14 +302,16 @@ class MainWindow(QWidget):
             return
 
 
-
         reply = QMessageBox.question(
             self,
             "Подтверждение",
             f"Переименовать файл?\n\n"
-            f"Протокол: {self.current_record.protocol}\n"
-            f"Организация: {self.current_record.organization}\n"
-            f"Индекс дела: {self.current_record.index}",
+            f"Протокол: "
+            f"{self.current_record.protocol}\n"
+            f"Организация: "
+            f"{self.current_record.organization}\n"
+            f"Индекс дела: "
+            f"{self.current_record.index}",
             QMessageBox.Yes | QMessageBox.No
         )
 
@@ -221,27 +321,25 @@ class MainWindow(QWidget):
             return
 
 
-
         try:
 
-            destination = self.file_manager.move_pdf(
-                self.current_pdf,
-                self.current_record.index
+            destination = (
+                self.file_manager.move_pdf(
+                    self.current_pdf,
+                    self.current_record.index
+                )
             )
 
 
-            self.excel.mark_scanned(
-                self.current_record.excel_row
-            )
-
-
-            # self.excel.save()
+            # Excel здесь НЕ изменяем.
+            # Строку в Excel закрашиваем вручную.
 
 
             QMessageBox.information(
                 self,
                 "Готово",
-                f"Файл сохранен:\n{destination.name}"
+                f"Файл сохранен:\n"
+                f"{destination.name}"
             )
 
 
@@ -261,7 +359,6 @@ class MainWindow(QWidget):
 
 
             self.load_first_pdf()
-
 
 
         except Exception as e:

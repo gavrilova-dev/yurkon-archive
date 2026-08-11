@@ -1,5 +1,4 @@
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
 
 from app.models.registry_entry import RegistryEntry
 
@@ -23,7 +22,6 @@ class ExcelService:
         self.sheet = self.workbook.active
 
         self.records = []
-
 
         headers = {}
 
@@ -51,22 +49,30 @@ class ExcelService:
 
 
         if not protocol_col:
+
             raise Exception(
                 "Не найден столбец 'Номер протокола'"
             )
 
+
         if not index_col:
+
             raise Exception(
                 "Не найден столбец 'Индекс дела'"
             )
 
+
         if not organization_col:
+
             raise Exception(
                 "Не найден столбец 'Наименование организации'"
             )
 
 
-        for row in range(3, self.sheet.max_row + 1):
+        for row in range(
+            3,
+            self.sheet.max_row + 1
+        ):
 
             protocol = self.sheet.cell(
                 row=row,
@@ -86,7 +92,6 @@ class ExcelService:
             ).value
 
 
-
             if protocol and index:
 
                 self.records.append(
@@ -100,42 +105,46 @@ class ExcelService:
                 )
 
 
-
     def find_by_protocol(self, protocol):
 
-        protocol = str(protocol).strip().lower()
+        protocol = str(
+            protocol
+        ).strip().lower()
+
+
+        if not protocol:
+
+            return None
+
+
+        matches = []
 
 
         for record in self.records:
 
-            excel_protocol = str(record.protocol).strip().lower()
+            excel_protocol = str(
+                record.protocol
+            ).strip().lower()
 
+
+            # Если пользователь ввёл часть номера:
+            # 9750 → найдёт 9750/2025,
+            # 9750/1 → найдёт 9750/1/2025.
             if excel_protocol.startswith(protocol):
 
-                return record
+                matches.append(record)
 
 
-        return None
+        if not matches:
+
+            return None
 
 
+        # Одно совпадение
+        if len(matches) == 1:
 
-    def mark_scanned(self, row):
-
-        fill = PatternFill(
-            start_color="C6EFCE",
-            end_color="C6EFCE",
-            fill_type="solid"
-        )
+            return matches[0]
 
 
-        for cell in self.sheet[row]:
-
-            cell.fill = fill
-
-
-
-    def save(self):
-
-        self.workbook.save(
-            self.path
-        )
+        # Несколько совпадений
+        return matches
