@@ -40,7 +40,7 @@ def _date(value):
         return value
 
 
-def export_report(template_path: str | Path, output_path: str | Path, records, batches) -> Path:
+def export_report(template_path: str | Path, output_path: str | Path, records, batches, year: int = 2026) -> Path:
     """Fill a copy of the user's original workbook. Every original sheet is retained."""
     template_path, output_path = Path(template_path), Path(output_path)
     if not template_path.exists():
@@ -135,7 +135,7 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
         batch_end = total_row - 1
         validation = DataValidation(
             type="list",
-            formula1='=INDIRECT("' + "'2026 Сводка по партиям'!$A$5:$A$" + str(batch_end) + '")',
+            formula1='=INDIRECT("' + "'" + str(year) + " Сводка по партиям'!$A$5:$A$" + str(batch_end) + '")',
             allow_blank=False,
         )
         manager.add_data_validation(validation)
@@ -200,6 +200,11 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
         wb.calculation.calcMode = "auto"
     except AttributeError:
         pass
+    # The source workbook may be from 2026, but each exported workbook is year-specific.
+    for suffix in ("Реестр", "Сводка по партиям", "Отчёт руководителю", "Годовой отчет"):
+        old_name = f"2026 {suffix}"
+        if old_name in wb.sheetnames and year != 2026:
+            wb[old_name].title = f"{year} {suffix}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
     return output_path
