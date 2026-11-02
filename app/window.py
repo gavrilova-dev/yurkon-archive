@@ -345,20 +345,21 @@ class BatchManagerDialog(QDialog):
 
 
 class ReportPreviewDialog(QDialog):
-    SHEETS = [
-        ("2026 Сводка по партиям", "Партии"),
-        ("2026 Отчёт руководителю", "Отчёт руководителю"),
-        ("2026 Годовой отчет", "Годовой отчёт"),
+    SHEET_TITLES = [
+        ("Сводка по партиям", "Партии"),
+        ("Отчёт руководителю", "Отчёт руководителю"),
+        ("Годовой отчет", "Годовой отчёт"),
     ]
 
-    def __init__(self, parent, workbook_path):
+    def __init__(self, parent, workbook_path, year=2026):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр отчётности")
         self.resize(1350, 760)
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         wb = load_workbook(workbook_path, data_only=False, read_only=True)
-        for sheet_name, title in self.SHEETS:
+        for suffix, title in self.SHEET_TITLES:
+            sheet_name = f"{year} {suffix}"
             if sheet_name not in wb.sheetnames:
                 continue
             ws = wb[sheet_name]
@@ -784,8 +785,8 @@ class MainWindow(QMainWindow):
             batches = [dict(b) for b in self.db.list_batches() if str(b["year"]) == year]
             with tempfile.TemporaryDirectory() as temp_dir:
                 preview_path = Path(temp_dir) / "preview.xlsx"
-                export_report(template, preview_path, records, batches)
-                preview = ReportPreviewDialog(self, preview_path)
+                export_report(template, preview_path, records, batches, int(year))
+                preview = ReportPreviewDialog(self, preview_path, int(year))
                 if preview.exec() != QDialog.DialogCode.Accepted:
                     return
             output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default_name, "Excel (*.xlsx)")
@@ -793,7 +794,7 @@ class MainWindow(QMainWindow):
                 return
             if not output.lower().endswith(".xlsx"):
                 output += ".xlsx"
-            export_report(template, output, records, batches)
+            export_report(template, output, records, batches, int(year))
             QMessageBox.information(
                 self, "Экспорт готов",
                 f"Файл создан:\n{output}\n\nГод отчётности: {year}. Все исходные листы шаблона сохранены."
