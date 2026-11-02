@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from copy import copy
+from pathlib import Path
+from datetime import datetime
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table
+
+
+MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
+
+
+def _copy_row_style(ws, source_row: int, target_row: int, max_col: int) -> None:
+    if source_row == target_row:
+        return
+    for col in range(1, max_col + 1):
+        src, dst = ws.cell(source_row, col), ws.cell(target_row, col)
+        if src.has_style:
+            dst._style = copy(src._style)
+        if src.number_format:
+            dst.number_format = src.number_format
+        if src.alignment:
+            dst.alignment = copy(src.alignment)
+        if src.protection:
+            dst.protection = copy(src.protection)
+    if source_row in ws.row_dimensions:
+        ws.row_dimensions[target_row].height = ws.row_dimensions[source_row].height
+
+
+def _date(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return value
+
+
+def export_report(template_path: str | Path, output_path: str | Path, records, batches) -> Path:
+    """Fill a copy of the user's original workbook. Every original sheet is retained."""
+    template_path, output_path = Path(template_path), Path(output_path)
+    if not template_path.exists():
+        raise FileNotFoundError(f"Не найден шаблон отчёта: {template_path}")
+    wb = load_workbook(template_path)
+    required = {"2026 Реестр", "2026 Сводка по партиям", "2026 Годовой отчет"}
+    if not required.issubset(set(wb.sheetnames)):
+        raise ValueError("Шаблон не похож на «2026_учет_контор.xlsx»: не найдены обязательные листы.")
+
+    ws = wb["2026 Реестр"]
+    # Keep the header, column widths, styles, formulas and Excel table.
+    source_style_row = min(2, ws.max_row)
+    last_data_row = max(1, len(records) + 1)
+    for row in range(2, last_data_row + 1):
+        if row > ws.max_row:
+            _copy_row_style(ws, source_style_row, row, 12)
+        rec = records[row - 2] if row - 2 < len(records) else None
+        if rec:
+            values = [
+                f"=ROW()-1", rec["executor"], rec["month"],
+                f'=IF(B{row}="","",B{row}&" - "&C{row})',
+                rec["protocol"], rec["organization"], int(rec["workplaces"] or 0),
+                f'=IF(G{row}="","",G{row}*20)', f'=IF(G{row}="","",G{row}*10)',
+                _date(rec["admin_done_date"]), f'=IF(J{row}<>"",100,0)', None,
+            ]
+        else:
+            values = [f"=ROW()-1", None, None, f'=IF(B{row}="","",B{row}&" - "&C{row})',
+                      None, None, None, f'=IF(G{row}="","",G{row}*20)',
+                      f'=IF(G{row}="","",G{row}*10)', None, f'=IF(J{row}<>"",100,0)', None]
+        for col, value in enumerate(values, 1):
+            ws.cell(row, col).value = value
+    # Clear stale records left by a longer previous export.
+    for row in range(last_data_row + 1, ws.max_row + 1):
+        for col in range(2, 13):
+            ws.cell(row, col).value = None
+    table = ws.tables.get("Реестр2026")
+    if table:
+        table.ref = f"A1:L{last_data_row}"
+    ws.auto_filter.ref = f"A1:L{last_data_row}"
+
+    # Batch register (one row per executor + month).
+    sw = wb["2026 Сводка по партиям"]
+    batch_start, total_row = 5, 5 + len(batches)
+    style_source = 5
+    for i, batch in enumerate(batches):
+        r = batch_start + i
+        _copy_row_style(sw, style_source, r, 13)
+        party = f'{batch["executor"]} - {batch["month"]}'
+        vals = [
+            party,
+            f'=COUNTIF(Реестр2026[Партия],A{r})',
+            _date(batch["primary_given_date"]),
+            _date(batch["primary_returned_date"]),
+            f'=SUMIF(Реестр2026[Партия],A{r},Реестр2026[Первичка: к получению (по 20 ₽)])',
+            f'=SUMIF(Реестр2026[Партия],A{r},Реестр2026[Первичка: моя доля (по 10 ₽)])',
+            _date(batch["primary_report_date"]),
+            _date(batch["primary_paid_date"]),
+            f'=COUNTIFS(Реестр2026[Партия],A{r},Реестр2026[Админ. работа выполнена (дата)],"<>")',
+            f'=SUMIF(Реестр2026[Партия],A{r},Реестр2026[Админ. сумма (100 ₽)])',
+            _date(batch["admin_report_date"]),
+            _date(batch["admin_paid_date"]),
+            batch["comment"] or "",
+        ]
+        for c, value in enumerate(vals, 1):
+            sw.cell(r, c).value = value
+    old_end = sw.max_row
+    _copy_row_style(sw, old_end, total_row, 13)
+    for r in range(total_row + 1, old_end + 1):
+        for c in range(1, 14):
+            sw.cell(r, c).value = None
+    total_values = ["ИТОГО ЗА ГОД", f"=SUM(B5:B{total_row-1})", None, None,
+                    f"=SUM(E5:E{total_row-1})", f"=SUM(F5:F{total_row-1})", None, None,
+                    f"=SUM(I5:I{total_row-1})", f"=SUM(J5:J{total_row-1})", None, None, None]
+    for c, value in enumerate(total_values, 1):
+        sw.cell(total_row, c).value = value
+    st = sw.tables.get("Свод2026")
+    if st:
+        st.ref = f"A4:M{total_row-1}"
+
+    # Lists used by drop-downs and reports.
+    executors = sorted({str(r["executor"]) for r in records if r["executor"]})
+    if "Списки" in wb.sheetnames:
+        lists = wb["Списки"]
+        for r in range(2, max(lists.max_row, len(executors) + 1) + 1):
+            lists.cell(r, 1).value = executors[r-2] if r-2 < len(executors) else None
+        for i, month in enumerate(MONTHS, 2):
+            lists.cell(i, 2).value = month
+
+    # Yearly report is retained with its original layout and recalculates from the table.
+    yr = wb["2026 Годовой отчет"]
+    for i, month in enumerate(MONTHS, 5):
+        yr.cell(i, 1).value = month
+        for col in range(2, 8):
+            letter = get_column_letter(col)
+            formula = {
+                2: f'=COUNTIF(Реестр2026[Месяц],A{i})',
+                3: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Кол-во рабочих мест])',
+                4: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Первичка: к получению (по 20 ₽)])',
+                5: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Первичка: моя доля (по 10 ₽)])',
+                6: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Админ. сумма (100 ₽)])',
+                7: f'=E{i}+F{i}',
+            }[col]
+            yr.cell(i, col).value = formula
+    # Update executor rows under the existing year-by-executor table.
+    header_row = 20
+    for i, executor in enumerate(executors, header_row + 1):
+        if i > yr.max_row:
+            _copy_row_style(yr, header_row + 1, i, 7)
+        yr.cell(i, 1).value = executor
+        yr.cell(i, 2).value = f'=COUNTIF(Реестр2026[Исполнитель],A{i})'
+        yr.cell(i, 3).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Кол-во рабочих мест])'
+        yr.cell(i, 4).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Первичка: к получению (по 20 ₽)])'
+        yr.cell(i, 5).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Первичка: моя доля (по 10 ₽)])'
+        yr.cell(i, 6).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Админ. сумма (100 ₽)])'
+        yr.cell(i, 7).value = f'=E{i}+F{i}'
+    for r in range(header_row + len(executors) + 1, yr.max_row + 1):
+        if r > 22:
+            for c in range(1, 8):
+                yr.cell(r, c).value = None
+
+    # All report variants stay in the file and are recalculated by Excel on open.
+    try:
+        wb.calculation.fullCalcOnLoad = True
+        wb.calculation.forceFullCalc = True
+        wb.calculation.calcMode = "auto"
+    except AttributeError:
+        pass
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_path)
+    return output_path
