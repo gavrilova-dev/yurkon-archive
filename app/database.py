@@ -281,8 +281,8 @@ class Database:
         )
         if record_id is not None:
             self.connection.execute(
-                "UPDATE primary_records SET scanned_date=?,pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (self._date(scanned_date), pdf_path, record_id),
+                "UPDATE primary_records SET scanned_date=?,admin_done_date=COALESCE(admin_done_date,?),pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (self._date(scanned_date), self._date(scanned_date), pdf_path, record_id),
             )
             self.connection.commit()
 
