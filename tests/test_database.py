@@ -20,6 +20,21 @@ class DatabaseTests(unittest.TestCase):
         result = self.db.import_archive_rows(rows)
         self.assertEqual(result["added"], 0)
         self.assertEqual(result["updated"], 2)
+    def test_cyrillic_search_archive_match_and_scan_status(self):
+        self.db.add_record({
+            "executor":"Аня","month":"октябрь","protocol":"1234/2026",
+            "organization":"ООО АЛЬФА","workplaces":2
+        })
+        self.db.import_archive_rows([{
+            "archive_index":"ИЛ-10-0001/2026","organization":"ооо альфа",
+            "protocol":"1234/2026","source_row":4
+        }])
+        rows = self.db.list_records("альфа")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["archive_index"], "ИЛ-10-0001/2026")
+        self.db.mark_scanned("1234/2026", "ооо альфа", "C:/ready/test.pdf", "2026-11-02")
+        self.assertEqual(self.db.list_records()[0]["scanned_date"], "2026-11-02")
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
