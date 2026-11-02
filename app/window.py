@@ -348,10 +348,13 @@ class ReportPreviewDialog(QDialog):
         note = QLabel("Показаны первые 250 строк каждого листа. Итоговый Excel сохранит все строки и листы шаблона.")
         layout.addWidget(note)
         buttons = QHBoxLayout()
-        close = QPushButton("Закрыть")
-        close.clicked.connect(self.reject)
+        cancel = QPushButton("Отмена")
+        proceed = QPushButton("Продолжить экспорт")
+        cancel.clicked.connect(self.reject)
+        proceed.clicked.connect(self.accept)
         buttons.addStretch()
-        buttons.addWidget(close)
+        buttons.addWidget(cancel)
+        buttons.addWidget(proceed)
         layout.addLayout(buttons)
 
 
@@ -694,7 +697,8 @@ class MainWindow(QMainWindow):
                 preview_path = Path(temp_dir) / "preview.xlsx"
                 export_report(template, preview_path, records, batches)
                 preview = ReportPreviewDialog(self, preview_path)
-                preview.exec()
+                if preview.exec() != QDialog.DialogCode.Accepted:
+                    return
             output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default_name, "Excel (*.xlsx)")
             if not output:
                 return
