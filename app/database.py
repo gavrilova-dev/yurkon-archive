@@ -166,28 +166,52 @@ class Database:
     def get_record(self, record_id: int):
         return self.connection.execute("SELECT * FROM primary_records WHERE id=?", (record_id,)).fetchone()
 
-    def list_records(self, search: str = "") -> list[sqlite3.Row]:
-        where = ""
-        params = ()
-        if search.strip():
-            q = f"%{search.strip()}%"
-            where = """WHERE p.organization LIKE ? OR p.protocol LIKE ? OR p.executor LIKE ?
-                       OR p.month LIKE ? OR EXISTS (
-                           SELECT 1 FROM archive_records ax
-                           WHERE ax.protocol_norm=replace(lower(trim(p.protocol)),' ','')
-                             AND ax.organization_norm=lower(trim(p.organization))
-                             AND ax.archive_index LIKE ?
-                       )"""
-            params = (q, q, q, q, q)
-        return list(self.connection.execute(f"""
-            SELECT p.*, (
-                SELECT a.archive_index FROM archive_records a
-                WHERE a.protocol_norm=replace(lower(trim(p.protocol)),' ','')
-                  AND a.organization_norm=lower(trim(p.organization))
-                ORDER BY a.id DESC LIMIT 1
-            ) AS archive_index
-            FROM primary_records p {where} ORDER BY p.id DESC
-        """, params))
+    def list_records(self, search: str = "") -> list[dict[str, Any]]:
+        records = [
+            dict(row) for row in self.connection.execute(
+                "SELECT * FROM primary_records ORDER BY id DESC"
+            )
+        ]
+        archive_map = {}
+        for archive in self.connection.execute(
+            "SELECT archive_index,protocol_norm,organization_norm FROM archive_records"
+        ):
+            archive_map[(archive["protocol_norm"], archive["organization_norm"])] = archive["archive_index"]
+
+        for record in records:
+            key = (
+                self._norm(record["protocol"]).replace(" ", ""),
+                self._norm(record["organization"]),
+            )
+            record["archive_index"] = archive_map.get(key)
+
+        query = self._norm(search)
+        if query:
+            searchable = ("organization", "protocol", "executor", "month", "archive_index", "notes")
+            records = [
+                record for record in records
+                if any(query in self._norm(record.get(field)) for field in searchable)
+            ]
+        return records
+
+    def mark_scanned(self, protocol: str, organization: str, pdf_path: str, scanned_date: str) -> None:
+        protocol_norm = self._norm(protocol).replace(" ", "")
+        organization_norm = self._norm(organization)
+        matches = self.connection.execute(
+            "SELECT id,protocol,organization FROM primary_records ORDER BY id DESC"
+        ).fetchall()
+        record_id = next(
+            (row["id"] for row in matches
+             if self._norm(row["protocol"]).replace(" ", "") == protocol_norm
+             and self._norm(row["organization"]) == organization_norm),
+            None,
+        )
+        if record_id is not None:
+            self.connection.execute(
+                "UPDATE primary_records SET scanned_date=?,pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (self._date(scanned_date), pdf_path, record_id),
+            )
+            self.connection.commit()
 
     def list_executors(self) -> list[str]:
         return [r[0] for r in self.connection.execute(
