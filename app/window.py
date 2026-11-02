@@ -666,9 +666,10 @@ class MainWindow(QMainWindow):
         if not path:
             return
         answer = QMessageBox.question(
-            self, "Перенос данных",
-            "Будут перенесены записи из листа «2026 Реестр» и даты партий. "
-            "Повторные записи не добавляются. Продолжить?"
+            self, "Загрузка отчетности",
+            "Будут загружены записи из листа «2026 Реестр» и данные по партиям. "
+            "Повторные записи не добавляются. Если в отчётности указано 100 ₽ за админ. работу, "
+            "будут отмечены статусы «Документы собраны» и «Отсканированы». Продолжить?"
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -676,8 +677,8 @@ class MainWindow(QMainWindow):
             result = self.db.import_legacy_workbook(path)
             self.refresh_table()
             QMessageBox.information(
-                self, "Перенос завершён",
-                f'Добавлено записей: {result["imported"]}\nПовторный перенос той же книги не создаст дубликаты.'
+                self, "Загрузка завершена",
+                f'Добавлено записей: {result["imported"]}\nПовторная загрузка той же книги не создаст дубликаты.'
             )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка переноса", str(exc))
