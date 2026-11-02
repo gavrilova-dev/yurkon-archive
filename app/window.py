@@ -207,8 +207,9 @@ class BatchDialog(QDialog):
 class BatchManagerDialog(QDialog):
     HEADERS = [
         "Исполнитель", "Месяц", "Статус партии", "Организаций", "Первичка отдана",
-        "Первичка возвращена", "Отчёт по первичке сдан", "Первичка оплачена",
-        "Отчёт по админке сдан", "Админка оплачена", "Комментарий",
+        "Первичка возвращена", "К получению, ₽", "Моя доля, ₽",
+        "Отчёт по первичке сдан", "Первичка оплачена", "Админ. выполнено",
+        "Админ. сумма, ₽", "Отчёт по админке сдан", "Админка оплачена", "Комментарий",
     ]
     FIELDS = [
         "primary_given_date", "primary_returned_date", "primary_report_date",
@@ -227,7 +228,7 @@ class BatchManagerDialog(QDialog):
         self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(14, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self._load_rows()
         buttons = QHBoxLayout()
@@ -247,10 +248,14 @@ class BatchManagerDialog(QDialog):
         batches = [dict(row) for row in self.db.list_batches()]
         self.table.setRowCount(len(batches))
         records = self.db.list_records()
-        counts = {}
+        aggregates = {}
         for rec in records:
             key = (rec["executor"], rec["month"])
-            counts[key] = counts.get(key, 0) + 1
+            item = aggregates.setdefault(key, {"count": 0, "workplaces": 0, "admin_count": 0})
+            item["count"] += 1
+            item["workplaces"] += int(rec["workplaces"] or 0)
+            if rec["admin_done_date"]:
+                item["admin_count"] += 1
         for r, batch in enumerate(batches):
             if batch.get("primary_paid_date") and batch.get("admin_paid_date"):
                 status = "Оплачена"
@@ -262,13 +267,24 @@ class BatchManagerDialog(QDialog):
                 status = "В работе"
             else:
                 status = "Не передана"
-            values = [batch["executor"], batch["month"], status,
-                      counts.get((batch["executor"], batch["month"]), 0)]
-            values += [_display_date(batch.get(field)) for field in self.FIELDS]
-            values += [batch.get("comment") or ""]
+            totals = aggregates.get((batch["executor"], batch["month"]), {})
+            workplaces = totals.get("workplaces", 0)
+            admin_count = totals.get("admin_count", 0)
+            values = [
+                batch["executor"], batch["month"], status, totals.get("count", 0),
+                _display_date(batch.get("primary_given_date")),
+                _display_date(batch.get("primary_returned_date")),
+                workplaces * 20, workplaces * 10,
+                _display_date(batch.get("primary_report_date")),
+                _display_date(batch.get("primary_paid_date")),
+                admin_count, admin_count * 100,
+                _display_date(batch.get("admin_report_date")),
+                _display_date(batch.get("admin_paid_date")),
+                batch.get("comment") or "",
+            ]
             for c, value in enumerate(values):
                 item = QTableWidgetItem(str(value if value is not None else ""))
-                if c in (2, 3):
+                if c in (2, 3, 6, 7, 10, 11):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, c, item)
 
@@ -284,7 +300,8 @@ class BatchManagerDialog(QDialog):
             return
         row = self.table.rowCount()
         self.table.insertRow(row)
-        values = [parts[0].strip(), parts[1].strip().casefold(), "Не передана", "0"] + [""] * 7
+        values = [parts[0].strip(), parts[1].strip().casefold(), "Не передана", "0",
+                  "", "", "0", "0", "", "", "0", "0", "", "", ""]
         for c, value in enumerate(values):
             self.table.setItem(row, c, QTableWidgetItem(value))
 
@@ -308,8 +325,8 @@ class BatchManagerDialog(QDialog):
                 if not executor or not month:
                     raise ValueError(f"Не заполнены исполнитель или месяц в строке {r + 1}.")
                 data = {"executor": executor, "month": month,
-                        "comment": self.table.item(r, 10).text().strip()}
-                for i, field in enumerate(self.FIELDS, 4):
+                        "comment": self.table.item(r, 14).text().strip()}
+                for i, field in zip((4, 5, 8, 9, 12, 13), self.FIELDS):
                     data[field] = self._to_iso(self.table.item(r, i).text())
                 self.db.save_batch(data)
             QMessageBox.information(self, "Сохранено", "Данные по партиям обновлены.")
