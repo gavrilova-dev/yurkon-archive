@@ -49,7 +49,7 @@ class Database:
             organization_norm TEXT NOT NULL,
             source_row INTEGER,
             imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(archive_index, protocol_norm, organization_norm)
+            UNIQUE(archive_index)
         );
         CREATE INDEX IF NOT EXISTS idx_archive_protocol ON archive_records(protocol_norm);
         CREATE INDEX IF NOT EXISTS idx_archive_index ON archive_records(archive_index);
@@ -141,27 +141,27 @@ class Database:
         return self.connection.execute("SELECT * FROM primary_records WHERE id=?", (record_id,)).fetchone()
 
     def list_records(self, search: str = "") -> list[sqlite3.Row]:
+        where = ""
+        params = ()
         if search.strip():
             q = f"%{search.strip()}%"
-            return list(self.connection.execute("""
-                SELECT p.*, a.archive_index
-                FROM primary_records p
-                LEFT JOIN archive_records a
-                  ON a.protocol_norm=lower(trim(p.protocol))
-                 AND a.organization_norm=lower(trim(p.organization))
-                WHERE p.organization LIKE ? OR p.protocol LIKE ? OR p.executor LIKE ?
-                   OR p.month LIKE ? OR a.archive_index LIKE ?
-                ORDER BY p.id DESC
-            """, (q, q, q, q, q)))
-        return list(self.connection.execute("""
+            where = """WHERE p.organization LIKE ? OR p.protocol LIKE ? OR p.executor LIKE ?
+                       OR p.month LIKE ? OR EXISTS (
+                           SELECT 1 FROM archive_records ax
+                           WHERE ax.protocol_norm=replace(lower(trim(p.protocol)),' ','')
+                             AND ax.organization_norm=lower(trim(p.organization))
+                             AND ax.archive_index LIKE ?
+                       )"""
+            params = (q, q, q, q, q)
+        return list(self.connection.execute(f"""
             SELECT p.*, (
                 SELECT a.archive_index FROM archive_records a
-                WHERE a.protocol_norm=lower(trim(p.protocol))
+                WHERE a.protocol_norm=replace(lower(trim(p.protocol)),' ','')
                   AND a.organization_norm=lower(trim(p.organization))
                 ORDER BY a.id DESC LIMIT 1
             ) AS archive_index
-            FROM primary_records p ORDER BY p.id DESC
-        """))
+            FROM primary_records p {where} ORDER BY p.id DESC
+        """, params))
 
     def list_executors(self) -> list[str]:
         return [r[0] for r in self.connection.execute(
@@ -203,14 +203,14 @@ class Database:
                 org_norm = self._norm(org)
                 protocol_norm = self._norm(protocol).replace(" ", "")
                 exists = self.connection.execute(
-                    """SELECT id FROM archive_records
-                       WHERE archive_index=? AND protocol_norm=? AND organization_norm=?""",
-                    (idx, protocol_norm, org_norm),
+                    "SELECT id FROM archive_records WHERE archive_index=?",
+                    (idx,),
                 ).fetchone()
                 if exists:
                     self.connection.execute(
-                        "UPDATE archive_records SET organization=?,protocol=?,source_row=?,imported_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (org, protocol, row.get("source_row"), exists["id"]),
+                        """UPDATE archive_records SET organization=?,protocol=?,protocol_norm=?,
+                           organization_norm=?,source_row=?,imported_at=CURRENT_TIMESTAMP WHERE id=?""",
+                        (org, protocol, protocol_norm, org_norm, row.get("source_row"), exists["id"]),
                     )
                     updated += 1
                 else:
