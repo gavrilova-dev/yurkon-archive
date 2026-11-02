@@ -163,13 +163,17 @@ class Database:
         return int(cur.lastrowid)
 
     def update_record(self, record_id: int, data: dict[str, Any]) -> None:
-        duplicate = self.find_duplicate_protocol(data.get("protocol", ""), exclude_id=record_id)
-        if duplicate:
-            raise ValueError(
-                f'Протокол {duplicate["protocol"]} уже есть в базе: '
-                f'{duplicate["organization"]} (исполнитель: {duplicate["executor"]}, '
-                f'партия: {duplicate["month"]}).'
-            )
+        current = self.get_record(record_id)
+        old_protocol = self._norm(current["protocol"]).replace(" ", "") if current else ""
+        new_protocol = self._norm(data.get("protocol", "")).replace(" ", "")
+        if old_protocol != new_protocol:
+            duplicate = self.find_duplicate_protocol(data.get("protocol", ""), exclude_id=record_id)
+            if duplicate:
+                raise ValueError(
+                    f'Протокол {duplicate["protocol"]} уже есть в базе: '
+                    f'{duplicate["organization"]} (исполнитель: {duplicate["executor"]}, '
+                    f'партия: {duplicate["month"]}).'
+                )
         fields = (
             "executor", "month", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
