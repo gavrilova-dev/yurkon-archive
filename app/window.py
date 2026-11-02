@@ -94,8 +94,10 @@ class RecordDialog(QDialog):
         self.assembled = OptionalDate()
         self.returned = OptionalDate()
         self.signed = OptionalDate()
+        self.yandex_uploaded = OptionalDate()
         for widget, key in ((self.admin_done, "admin_done_date"), (self.assembled, "assembled_date"),
-                            (self.returned, "returned_date"), (self.signed, "signed_date")):
+                            (self.returned, "returned_date"), (self.signed, "signed_date"),
+                            (self.yandex_uploaded, "yandex_uploaded_date")):
             widget.set_value(data.get(key))
 
         self.notes = QTextEdit()
@@ -111,6 +113,7 @@ class RecordDialog(QDialog):
         form.addRow("Документы собраны", self.assembled)
         form.addRow("Возвращены с подписи", self.returned)
         form.addRow("Подписаны", self.signed)
+        form.addRow("Выгружено на Яндекс.Диск", self.yandex_uploaded)
         form.addRow("Комментарий", self.notes)
 
         buttons = QHBoxLayout()
@@ -133,6 +136,7 @@ class RecordDialog(QDialog):
             "assembled_date": self.assembled.value(),
             "returned_date": self.returned.value(),
             "signed_date": self.signed.value(),
+            "yandex_uploaded_date": self.yandex_uploaded.value(),
             "notes": self.notes.toPlainText().strip(),
         }
 
@@ -214,6 +218,7 @@ class MainWindow(QMainWindow):
         ("admin", "Админ, ₽"), ("archive_index", "Индекс дела"),
         ("assembled_date", "Собрано"), ("returned_date", "Возвращено"),
         ("signed_date", "Подписано"), ("scanned_date", "Скан"),
+        ("yandex_uploaded_date", "Яндекс.Диск"),
     ]
 
     def __init__(self):
@@ -252,6 +257,7 @@ class MainWindow(QMainWindow):
             ("Импорт архива", self.import_archive),
             ("Перенести старый Excel", self.import_legacy),
             ("Экспорт отчётов", self.export_reports),
+            ("Резервная копия", self.backup_database),
         ]
         for label, callback in actions:
             button = QPushButton(label)
@@ -340,6 +346,7 @@ class MainWindow(QMainWindow):
                 record["organization"], workplaces, fee, share, admin, record["archive_index"] or "",
                 _display_date(record["assembled_date"]), _display_date(record["returned_date"]),
                 _display_date(record["signed_date"]), _display_date(record["scanned_date"]),
+                _display_date(record["yandex_uploaded_date"]),
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value if value is not None else ""))
@@ -473,6 +480,19 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка экспорта", str(exc))
 
+    def backup_database(self):
+        default = str(APP_DATA / f"yurkon_archive_backup_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить резервную копию базы", default, "SQLite (*.sqlite3)")
+        if not path:
+            return
+        if not path.lower().endswith(".sqlite3"):
+            path += ".sqlite3"
+        try:
+            self.db.backup_to(path)
+            QMessageBox.information(self, "Резервная копия создана", f"База сохранена:\n{path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
+
     def refresh_scan_queue(self):
         files = self.file_manager.get_new_files()
         selected_path = self.current_pdf
@@ -575,6 +595,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         try:
             self.watcher.stop()
+            backup_dir = APP_DATA / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            self.db.backup_to(backup_dir / f"yurkon_archive_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
         finally:
             self.db.close()
         super().closeEvent(event)
