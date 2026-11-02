@@ -135,70 +135,7 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
         batch_end = total_row - 1
         validation = DataValidation(
             type="list",
-            formula1='=INDIRECT("\'2026 Сводка по партиям\'!$A$5:$A
-    if st:
-        st.ref = f"A4:M{total_row-1}"
-
-    # Lists used by drop-downs and reports.
-    executors = sorted({str(r["executor"]) for r in records if r["executor"]})
-    if "Списки" in wb.sheetnames:
-        lists = wb["Списки"]
-        for r in range(2, max(lists.max_row, len(executors) + 1) + 1):
-            lists.cell(r, 1).value = executors[r-2] if r-2 < len(executors) else None
-        for i, month in enumerate(MONTHS, 2):
-            lists.cell(i, 2).value = month
-
-    # Yearly report is retained with its original layout and recalculates from the table.
-    yr = wb["2026 Годовой отчет"]
-    for i, month in enumerate(MONTHS, 5):
-        yr.cell(i, 1).value = month
-        for col in range(2, 8):
-            letter = get_column_letter(col)
-            formula = {
-                2: f'=COUNTIF(Реестр2026[Месяц],A{i})',
-                3: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Кол-во рабочих мест])',
-                4: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Первичка: к получению (по 20 ₽)])',
-                5: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Первичка: моя доля (по 10 ₽)])',
-                6: f'=SUMIF(Реестр2026[Месяц],A{i},Реестр2026[Админ. сумма (100 ₽)])',
-                7: f'=E{i}+F{i}',
-            }[col]
-            yr.cell(i, col).value = formula
-    # Update executor rows without overwriting the payment-status section below.
-    header_row = 20
-    extra_rows = max(0, len(executors) - 3)
-    if extra_rows:
-        yr.insert_rows(24, extra_rows)
-    for offset, executor in enumerate(executors):
-        row = header_row + 1 + offset
-        if row >= 23:
-            _copy_row_style(yr, 22, row, 7)
-        yr.cell(row, 1).value = executor
-        yr.cell(row, 2).value = f'=COUNTIF(Реестр2026[Исполнитель],A{row})'
-        yr.cell(row, 3).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Кол-во рабочих мест])'
-        yr.cell(row, 4).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Первичка: к получению (по 20 ₽)])'
-        yr.cell(row, 5).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Первичка: моя доля (по 10 ₽)])'
-        yr.cell(row, 6).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Админ. сумма (100 ₽)])'
-        yr.cell(row, 7).value = f'=E{row}+F{row}'
-    for row in range(header_row + 1 + len(executors), 23):
-        for col in range(1, 8):
-            yr.cell(row, col).value = None
-    executor_table = yr.tables.get("ГодПоИсполнителям")
-    if executor_table:
-        executor_table.ref = f"A{header_row}:G{header_row + len(executors)}"
-    if yr.print_area:
-        yr.print_area = f"A1:G{29 + extra_rows}"
-
-    # All report variants stay in the file and are recalculated by Excel on open.
-    try:
-        wb.calculation.fullCalcOnLoad = True
-        wb.calculation.forceFullCalc = True
-        wb.calculation.calcMode = "auto"
-    except AttributeError:
-        pass
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
-    return output_path
- + str(batch_end) + '")',
+            formula1='=INDIRECT("' + "'2026 Сводка по партиям'!$A$5:$A$" + str(batch_end) + '")',
             allow_blank=False,
         )
         manager.add_data_validation(validation)
