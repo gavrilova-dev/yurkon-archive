@@ -58,6 +58,21 @@ class DatabaseTests(unittest.TestCase):
                 "organization":"ООО Бета","workplaces":2
             })
 
+    def test_existing_legacy_duplicate_can_still_be_updated_without_changing_protocol(self):
+        record_id = self.db.add_record({
+            "executor":"Анна","month":"февраль","protocol":"9356/2025",
+            "organization":"ООО Альфа","workplaces":1
+        })
+        self.db.connection.execute("""
+            INSERT INTO primary_records(executor,month,protocol,organization,workplaces)
+            VALUES(?,?,?,?,?)
+        """, ("Мария","март","9356/2025","ООО Бета",2))
+        self.db.connection.commit()
+        record = dict(self.db.get_record(record_id))
+        record["assembled_date"] = "2026-11-02"
+        self.db.update_record(record_id, record)
+        self.assertEqual(self.db.get_record(record_id)["assembled_date"], "2026-11-02")
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
