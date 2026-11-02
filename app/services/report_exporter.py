@@ -71,9 +71,20 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
                       f'=IF(G{row}="","",G{row}*10)', None, f'=IF(J{row}<>"",100,0)', None]
         for col, value in enumerate(values, 1):
             ws.cell(row, col).value = value
-    # Clear stale records left by a longer previous export.
-    for row in range(last_data_row + 1, ws.max_row + 1):
-        for col in range(2, 13):
+    # Keep a subtotal row immediately after the current data, and remove stale rows.
+    total_registry_row = last_data_row + 1
+    if total_registry_row > ws.max_row:
+        _copy_row_style(ws, 418, total_registry_row, 12)
+    ws.cell(total_registry_row, 6).value = "ИТОГО (видимые строки):"
+    for col, formula in {
+        7: f"=SUBTOTAL(109,G2:G{last_data_row})",
+        8: f"=SUBTOTAL(109,H2:H{last_data_row})",
+        9: f"=SUBTOTAL(109,I2:I{last_data_row})",
+        11: f"=SUBTOTAL(109,K2:K{last_data_row})",
+    }.items():
+        ws.cell(total_registry_row, col).value = formula
+    for row in range(total_registry_row + 1, ws.max_row + 1):
+        for col in range(1, 13):
             ws.cell(row, col).value = None
     table = ws.tables.get("Реестр2026")
     if table:
@@ -155,10 +166,12 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
         yr.cell(i, 5).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Первичка: моя доля (по 10 ₽)])'
         yr.cell(i, 6).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Админ. сумма (100 ₽)])'
         yr.cell(i, 7).value = f'=E{i}+F{i}'
+    executor_table = yr.tables.get("ГодПоИсполнителям")
+    if executor_table:
+        executor_table.ref = f"A{header_row}:G{header_row + len(executors)}"
     for r in range(header_row + len(executors) + 1, yr.max_row + 1):
-        if r > 22:
-            for c in range(1, 8):
-                yr.cell(r, c).value = None
+        for c in range(1, 8):
+            yr.cell(r, c).value = None
 
     # All report variants stay in the file and are recalculated by Excel on open.
     try:
