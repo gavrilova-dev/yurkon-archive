@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
@@ -449,21 +449,23 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.search)
         layout.addLayout(search_row)
 
-        filter_row = QHBoxLayout()
+        filter_grid = QGridLayout()
         self.filter_boxes = {}
-        for key, label in (("executor", "Исполнитель"), ("month", "Месяц"),
-                           ("organization", "Организация"), ("protocol", "Протокол"),
-                           ("archive_index", "Индекс дела"),
-                           ("assembled", "Документы собраны"), ("scanned", "Отсканированы"),
-                           ("yandex", "Яндекс.Диск")):
-            filter_row.addWidget(QLabel(label))
+        filter_specs = (("executor", "Исполнитель"), ("month", "Месяц"),
+                        ("organization", "Организация"), ("protocol", "Протокол"),
+                        ("archive_index", "Индекс дела"),
+                        ("assembled", "Документы собраны"), ("scanned", "Отсканированы"),
+                        ("yandex", "Яндекс.Диск"))
+        for index, (key, label) in enumerate(filter_specs):
+            grid_row, group = divmod(index, 4)
+            filter_grid.addWidget(QLabel(label), grid_row, group * 2)
             combo = QComboBox()
-            combo.setMaximumWidth(180)
+            combo.setMaximumWidth(190)
             combo.addItem("Все", "")
             combo.currentIndexChanged.connect(self.refresh_table)
             self.filter_boxes[key] = combo
-            filter_row.addWidget(combo)
-        layout.addLayout(filter_row)
+            filter_grid.addWidget(combo, grid_row, group * 2 + 1)
+        layout.addLayout(filter_grid)
 
         self.table = QTableWidget(0, len(self.COLUMNS) + 1)
         self.table.setHorizontalHeaderLabels(["ID"] + [item[1] for item in self.COLUMNS])
