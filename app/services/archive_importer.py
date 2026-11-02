@@ -7,7 +7,7 @@ def _header(value: object) -> str:
 
 
 def read_archive_journal(path: str | Path) -> list[dict]:
-    wb = load_workbook(path, read_only=True, data_only=True)
+    wb = load_workbook(path, data_only=True)
     ws = wb["Вход Архив ИЛ-10"] if "Вход Архив ИЛ-10" in wb.sheetnames else wb.active
     header_row = None
     columns = {}
@@ -28,10 +28,14 @@ def read_archive_journal(path: str | Path) -> list[dict]:
         raise ValueError("В журнале не хватает столбцов индекса, организации или номера протокола.")
 
     result = []
-    for row_num in range(header_row + 2, ws.max_row + 1):
-        idx = ws.cell(row_num, index_col).value
-        org = ws.cell(row_num, org_col).value
-        protocol = ws.cell(row_num, protocol_col).value
+    max_col = max(index_col, org_col, protocol_col)
+    for row_num, values in enumerate(
+        ws.iter_rows(min_row=header_row + 2, min_col=1, max_col=max_col, values_only=True),
+        start=header_row + 2,
+    ):
+        idx = values[index_col - 1]
+        org = values[org_col - 1]
+        protocol = values[protocol_col - 1]
         if idx and org and protocol:
             result.append({
                 "archive_index": str(idx).strip(),
