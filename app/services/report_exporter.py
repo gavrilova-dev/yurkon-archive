@@ -158,24 +158,30 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
                 7: f'=E{i}+F{i}',
             }[col]
             yr.cell(i, col).value = formula
-    # Update executor rows under the existing year-by-executor table.
+    # Update executor rows without overwriting the payment-status section below.
     header_row = 20
-    for i, executor in enumerate(executors, header_row + 1):
-        if i > yr.max_row:
-            _copy_row_style(yr, header_row + 1, i, 7)
-        yr.cell(i, 1).value = executor
-        yr.cell(i, 2).value = f'=COUNTIF(Реестр2026[Исполнитель],A{i})'
-        yr.cell(i, 3).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Кол-во рабочих мест])'
-        yr.cell(i, 4).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Первичка: к получению (по 20 ₽)])'
-        yr.cell(i, 5).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Первичка: моя доля (по 10 ₽)])'
-        yr.cell(i, 6).value = f'=SUMIF(Реестр2026[Исполнитель],A{i},Реестр2026[Админ. сумма (100 ₽)])'
-        yr.cell(i, 7).value = f'=E{i}+F{i}'
+    extra_rows = max(0, len(executors) - 3)
+    if extra_rows:
+        yr.insert_rows(24, extra_rows)
+    for offset, executor in enumerate(executors):
+        row = header_row + 1 + offset
+        if row >= 23:
+            _copy_row_style(yr, 22, row, 7)
+        yr.cell(row, 1).value = executor
+        yr.cell(row, 2).value = f'=COUNTIF(Реестр2026[Исполнитель],A{row})'
+        yr.cell(row, 3).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Кол-во рабочих мест])'
+        yr.cell(row, 4).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Первичка: к получению (по 20 ₽)])'
+        yr.cell(row, 5).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Первичка: моя доля (по 10 ₽)])'
+        yr.cell(row, 6).value = f'=SUMIF(Реестр2026[Исполнитель],A{row},Реестр2026[Админ. сумма (100 ₽)])'
+        yr.cell(row, 7).value = f'=E{row}+F{row}'
+    for row in range(header_row + 1 + len(executors), 23):
+        for col in range(1, 8):
+            yr.cell(row, col).value = None
     executor_table = yr.tables.get("ГодПоИсполнителям")
     if executor_table:
         executor_table.ref = f"A{header_row}:G{header_row + len(executors)}"
-    for r in range(header_row + len(executors) + 1, yr.max_row + 1):
-        for c in range(1, 8):
-            yr.cell(r, c).value = None
+    if yr.print_area:
+        yr.print_area = f"A1:G{29 + extra_rows}"
 
     # All report variants stay in the file and are recalculated by Excel on open.
     try:
