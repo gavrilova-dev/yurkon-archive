@@ -424,10 +424,13 @@ class MainWindow(QMainWindow):
         filter_row = QHBoxLayout()
         self.filter_boxes = {}
         for key, label in (("executor", "Исполнитель"), ("month", "Месяц"),
+                           ("organization", "Организация"), ("protocol", "Протокол"),
+                           ("archive_index", "Индекс дела"),
                            ("assembled", "Документы собраны"), ("scanned", "Отсканированы"),
                            ("yandex", "Яндекс.Диск")):
             filter_row.addWidget(QLabel(label))
             combo = QComboBox()
+            combo.setMaximumWidth(180)
             combo.addItem("Все", "")
             combo.currentIndexChanged.connect(self.refresh_table)
             self.filter_boxes[key] = combo
@@ -495,8 +498,8 @@ class MainWindow(QMainWindow):
         rows = self.db.list_records(self.search.text() if hasattr(self, "search") else "")
         if hasattr(self, "filter_boxes"):
             filter_values = {
-                "executor": sorted({str(r["executor"]) for r in rows if r["executor"]}),
-                "month": sorted({str(r["month"]) for r in rows if r["month"]}),
+                key: sorted({str(r[key]) for r in rows if r.get(key)})
+                for key in ("executor", "month", "organization", "protocol", "archive_index")
             }
             for key, values in filter_values.items():
                 combo = self.filter_boxes[key]
@@ -525,9 +528,9 @@ class MainWindow(QMainWindow):
             filtered = []
             for record in rows:
                 ok = True
-                for key in ("executor", "month"):
+                for key in ("executor", "month", "organization", "protocol", "archive_index"):
                     value = self.filter_boxes[key].currentData()
-                    if value and str(record[key]) != value:
+                    if value and str(record.get(key) or "") != value:
                         ok = False
                 for key, field in (("assembled", "assembled_date"), ("scanned", "scanned_date"),
                                    ("yandex", "yandex_uploaded_date")):
