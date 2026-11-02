@@ -92,11 +92,8 @@ class RecordDialog(QDialog):
 
         self.admin_done = OptionalDate()
         self.assembled = OptionalDate()
-        self.returned = OptionalDate()
-        self.signed = OptionalDate()
         self.yandex_uploaded = OptionalDate()
         for widget, key in ((self.admin_done, "admin_done_date"), (self.assembled, "assembled_date"),
-                            (self.returned, "returned_date"), (self.signed, "signed_date"),
                             (self.yandex_uploaded, "yandex_uploaded_date")):
             widget.set_value(data.get(key))
 
@@ -111,8 +108,6 @@ class RecordDialog(QDialog):
         form.addRow("Рабочих мест", self.workplaces)
         form.addRow("Административная работа выполнена", self.admin_done)
         form.addRow("Документы собраны", self.assembled)
-        form.addRow("Возвращены с подписи", self.returned)
-        form.addRow("Подписаны", self.signed)
         form.addRow("Выгружено на Яндекс.Диск", self.yandex_uploaded)
         form.addRow("Комментарий", self.notes)
 
@@ -134,8 +129,6 @@ class RecordDialog(QDialog):
             "workplaces": self.workplaces.value(),
             "admin_done_date": self.admin_done.value(),
             "assembled_date": self.assembled.value(),
-            "returned_date": self.returned.value(),
-            "signed_date": self.signed.value(),
             "yandex_uploaded_date": self.yandex_uploaded.value(),
             "notes": self.notes.toPlainText().strip(),
         }
@@ -217,8 +210,7 @@ class MainWindow(QMainWindow):
         ("fee", "К получению, ₽"), ("share", "Моя доля, ₽"),
         ("admin", "Админ, ₽"), ("archive_index", "Индекс дела"),
         ("assembled_date", "Собрано"), ("returned_date", "Возвращено"),
-        ("signed_date", "Подписано"), ("scanned_date", "Скан"),
-        ("yandex_uploaded_date", "Яндекс.Диск"),
+        ("scanned_date", "Отсканированы"), ("yandex_uploaded_date", "Яндекс.Диск"),
     ]
 
     def __init__(self):
@@ -255,7 +247,7 @@ class MainWindow(QMainWindow):
             ("Удалить", self.delete_record),
             ("Контроль партий", self.manage_batches),
             ("Импорт архива", self.import_archive),
-            ("Перенести старый Excel", self.import_legacy),
+            ("Загрузить отчетность", self.import_legacy),
             ("Экспорт отчётов", self.export_reports),
             ("Резервная копия", self.backup_database),
         ]
@@ -273,6 +265,19 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.search)
         layout.addLayout(search_row)
 
+        filter_row = QHBoxLayout()
+        self.filter_boxes = {}
+        for key, label in (("executor", "Исполнитель"), ("month", "Месяц"),
+                           ("assembled", "Документы собраны"), ("scanned", "Отсканированы"),
+                           ("yandex", "Яндекс.Диск")):
+            filter_row.addWidget(QLabel(label))
+            combo = QComboBox()
+            combo.addItem("Все", "")
+            combo.currentIndexChanged.connect(self.refresh_table)
+            self.filter_boxes[key] = combo
+            filter_row.addWidget(combo)
+        layout.addLayout(filter_row)
+
         self.table = QTableWidget(0, len(self.COLUMNS) + 1)
         self.table.setHorizontalHeaderLabels(["ID"] + [item[1] for item in self.COLUMNS])
         self.table.setColumnHidden(0, True)
@@ -281,6 +286,7 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self.edit_record)
+        self.table.itemChanged.connect(self.update_status_from_table)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
@@ -331,6 +337,54 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "table"):
             return
         rows = self.db.list_records(self.search.text() if hasattr(self, "search") else "")
+        if hasattr(self, "filter_boxes"):
+            filter_values = {
+                "executor": sorted({str(r["executor"]) for r in rows if r["executor"]}),
+                "month": sorted({str(r["month"]) for r in rows if r["month"]}),
+            }
+            for key, values in filter_values.items():
+                combo = self.filter_boxes[key]
+                selected = combo.currentText()
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem("Все", "")
+                for value in values:
+                    combo.addItem(value, value)
+                idx = combo.findText(selected)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+            for key in ("assembled", "scanned", "yandex"):
+                combo = self.filter_boxes[key]
+                selected = combo.currentText()
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem("Все", "")
+                combo.addItem("Есть", "yes")
+                combo.addItem("Нет", "no")
+                idx = combo.findText(selected)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+            filtered = []
+            for record in rows:
+                ok = True
+                for key in ("executor", "month"):
+                    value = self.filter_boxes[key].currentData()
+                    if value and str(record[key]) != value:
+                        ok = False
+                for key, field in (("assembled", "assembled_date"), ("scanned", "scanned_date"),
+                                   ("yandex", "yandex_uploaded_date")):
+                    value = self.filter_boxes[key].currentData()
+                    if value == "yes" and not record[field]:
+                        ok = False
+                    if value == "no" and record[field]:
+                        ok = False
+                if ok:
+                    filtered.append(record)
+            rows = filtered
+
+        self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
@@ -344,20 +398,40 @@ class MainWindow(QMainWindow):
             values = [
                 record["id"], record["executor"], record["month"], record["protocol"],
                 record["organization"], workplaces, fee, share, admin, record["archive_index"] or "",
-                _display_date(record["assembled_date"]), _display_date(record["returned_date"]),
-                _display_date(record["signed_date"]), _display_date(record["scanned_date"]),
-                _display_date(record["yandex_uploaded_date"]),
+                record["assembled_date"], record["scanned_date"], record["yandex_uploaded_date"],
             ]
             for col, value in enumerate(values):
-                item = QTableWidgetItem(str(value if value is not None else ""))
+                item = QTableWidgetItem("")
+                if col in (10, 11, 12):
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+                    item.setCheckState(Qt.CheckState.Checked if value else Qt.CheckState.Unchecked)
+                    item.setData(Qt.ItemDataRole.UserRole, record["id"])
+                else:
+                    item.setText(str(value if value is not None else ""))
                 if col in (0, 5, 6, 7, 8):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row_num, col, item)
+        self.table.blockSignals(False)
         self.summary.setText(
             f"Записей: {len(rows)} · Рабочих мест: {total_workplaces} · "
             f"К получению: {total_fee:,} ₽ · Моя доля: {total_share:,} ₽ · "
             f"Админ. работа: {total_admin:,} ₽".replace(",", " ")
         )
+
+    def update_status_from_table(self, item):
+        if item.column() not in (10, 11, 12):
+            return
+        record_id = item.data(Qt.ItemDataRole.UserRole)
+        if not record_id:
+            return
+        record = dict(self.db.get_record(int(record_id)))
+        field = {10: "assembled_date", 11: "scanned_date", 12: "yandex_uploaded_date"}[item.column()]
+        record[field] = date.today().isoformat() if item.checkState() == Qt.CheckState.Checked else None
+        try:
+            self.db.update_record(int(record_id), record)
+        except Exception as exc:
+            QMessageBox.critical(self, "Не удалось сохранить статус", str(exc))
+        self.refresh_table()
 
     def selected_record_id(self):
         row = self.table.currentRow()
@@ -369,8 +443,11 @@ class MainWindow(QMainWindow):
     def add_record(self):
         dialog = RecordDialog(self, executors=self.db.list_executors())
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.db.add_record(dialog.data())
-            self.refresh_table()
+            try:
+                self.db.add_record(dialog.data())
+                self.refresh_table()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Дубликат протокола", str(exc))
 
     def edit_record(self, *_):
         record_id = self.selected_record_id()
@@ -380,8 +457,11 @@ class MainWindow(QMainWindow):
         record = self.db.get_record(record_id)
         dialog = RecordDialog(self, dict(record), self.db.list_executors())
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.db.update_record(record_id, dialog.data())
-            self.refresh_table()
+            try:
+                self.db.update_record(record_id, dialog.data())
+                self.refresh_table()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Дубликат протокола", str(exc))
 
     def delete_record(self):
         record_id = self.selected_record_id()
