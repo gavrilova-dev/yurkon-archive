@@ -73,8 +73,10 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
             ws.cell(row, col).value = value
     # Keep a subtotal row immediately after the current data, and remove stale rows.
     total_registry_row = last_data_row + 1
-    if total_registry_row > ws.max_row:
-        _copy_row_style(ws, 418, total_registry_row, 12)
+    _copy_row_style(ws, min(418, ws.max_row), total_registry_row, 12)
+    if total_registry_row != 418 and 418 <= ws.max_row:
+        for col in range(1, 13):
+            ws.cell(418, col).value = None
     ws.cell(total_registry_row, 6).value = "ИТОГО (видимые строки):"
     for col, formula in {
         7: f"=SUBTOTAL(109,G2:G{last_data_row})",
@@ -126,6 +128,8 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
                     f"=SUM(I5:I{total_row-1})", f"=SUM(J5:J{total_row-1})", None, None, None]
     for c, value in enumerate(total_values, 1):
         sw.cell(total_row, c).value = value
+    if "2026 Отчёт руководителю" in wb.sheetnames and batches:
+        wb["2026 Отчёт руководителю"]["B3"] = f'{batches[0]["executor"]} - {batches[0]["month"]}'
     st = sw.tables.get("Свод2026")
     if st:
         st.ref = f"A4:M{total_row-1}"
