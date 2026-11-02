@@ -252,8 +252,10 @@ class BatchManagerDialog(QDialog):
             key = (rec["executor"], rec["month"])
             counts[key] = counts.get(key, 0) + 1
         for r, batch in enumerate(batches):
-            if batch.get("primary_paid_date"):
+            if batch.get("primary_paid_date") and batch.get("admin_paid_date"):
                 status = "Оплачена"
+            elif batch.get("primary_paid_date") or batch.get("admin_paid_date"):
+                status = "Частично оплачена"
             elif batch.get("primary_returned_date"):
                 status = "Возвращена"
             elif batch.get("primary_given_date"):
