@@ -35,6 +35,29 @@ class DatabaseTests(unittest.TestCase):
         self.db.mark_scanned("1234/2026", "ооо альфа", "C:/ready/test.pdf", "2026-11-02")
         self.assertEqual(self.db.list_records()[0]["scanned_date"], "2026-11-02")
 
+    def test_archive_index_matches_when_organization_punctuation_differs(self):
+        self.db.add_record({
+            "executor":"Лилия","month":"февраль","protocol":"9356/2025",
+            "organization":'ООО "ДРТ Групп"',"workplaces":15
+        })
+        self.db.import_archive_rows([{
+            "archive_index":"ИЛ-10-0001/2025","organization":"ООО ДРТ Групп",
+            "protocol":"9356/2025","source_row":4
+        }])
+        row = self.db.list_records()[0]
+        self.assertEqual(row["archive_index"], "ИЛ-10-0001/2025")
+
+    def test_duplicate_protocol_is_rejected_even_for_another_organization(self):
+        self.db.add_record({
+            "executor":"Анна","month":"февраль","protocol":"9356/2025",
+            "organization":"ООО Альфа","workplaces":1
+        })
+        with self.assertRaisesRegex(ValueError, "уже есть в базе"):
+            self.db.add_record({
+                "executor":"Мария","month":"март","protocol":"9356/2025",
+                "organization":"ООО Бета","workplaces":2
+            })
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
