@@ -29,7 +29,12 @@ class ReportExporterTests(unittest.TestCase):
                 "executor":"Аня","month":"октябрь","protocol":"1234/2026",
                 "organization":"ООО Тест","workplaces":5,"admin_done_date":None
             }]
-            export_report(template, output, records, [])
+            batches = [{
+                "executor":"Аня","month":"октябрь","primary_given_date":None,
+                "primary_returned_date":None,"primary_report_date":None,"primary_paid_date":None,
+                "admin_report_date":None,"admin_paid_date":None,"comment":""
+            }]
+            export_report(template, output, records, batches)
             result = load_workbook(output, data_only=False)
             self.assertEqual(result.sheetnames, wb.sheetnames)
             self.assertEqual(result["2026 Реестр"]["E2"].value, "1234/2026")
@@ -38,6 +43,8 @@ class ReportExporterTests(unittest.TestCase):
             self.assertNotIn("Индекс дела", [result["2026 Реестр"].cell(1,c).value for c in range(1,13)])
             self.assertEqual(result["2026 Годовой отчет"]["A24"].value, "Статус оплаты (по партиям)")
             self.assertEqual(result["2026 Годовой отчет"]["A26"].value, "Первичка: оплачено")
+            self.assertEqual(result["2026 Отчёт руководителю"]["B3"].value, "Аня - октябрь")
+            self.assertEqual(len(result["2026 Отчёт руководителю"].data_validations.dataValidation), 1)
 
 if __name__ == "__main__":
     unittest.main()
