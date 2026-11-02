@@ -431,16 +431,17 @@ class Database:
                       WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
                     )
                 """, (data["executor"],data["month"],data["year"],data["protocol"],data["organization"],
-                      workplaces,self._date(data["admin_done_date"]),status_date,status_date,
+                      workplaces,(self._date(data["admin_done_date"]) or status_date),status_date,status_date,
                       data["protocol"],data["organization"],data["executor"],data["month"],data["year"]))
                 imported += self.connection.execute("SELECT changes()").fetchone()[0]
                 if paid_100:
                     self.connection.execute("""
                         UPDATE primary_records
-                        SET assembled_date=COALESCE(assembled_date,?),
+                        SET admin_done_date=COALESCE(admin_done_date,?),
+                            assembled_date=COALESCE(assembled_date,?),
                             scanned_date=COALESCE(scanned_date,?)
                         WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
-                    """, (status_date,status_date,data["protocol"],data["organization"],
+                    """, (status_date,status_date,status_date,data["protocol"],data["organization"],
                           data["executor"],data["month"],data["year"]))
                     statuses_updated += self.connection.execute("SELECT changes()").fetchone()[0]
 
