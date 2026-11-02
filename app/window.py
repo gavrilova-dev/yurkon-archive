@@ -755,10 +755,21 @@ class MainWindow(QMainWindow):
             if not template:
                 return
             self.db.set_setting("report_template", template)
-        default_name = str(Path(template).with_name(f"Отчёт_YURKON_{date.today():%Y-%m-%d}.xlsx"))
+        available_years = sorted({str(r["year"]) for r in self.db.list_records()}, reverse=True)
+        if not available_years:
+            QMessageBox.information(self, "Нет данных", "Сначала добавьте или загрузите организации.")
+            return
+        current_filter = self.filter_boxes["year"].currentData()
+        default_year = current_filter if current_filter in available_years else available_years[0]
+        year, ok = QInputDialog.getItem(self, "Выгрузить отчёт", "За какой год подготовить отчёт?", available_years,
+                                        available_years.index(default_year), False)
+        if not ok:
+            return
+        default_name = str(Path(template).with_name(f"Отчёт_YURKON_{year}_{date.today():%Y-%m-%d}.xlsx"))
         try:
-            records = sorted((dict(r) for r in self.db.list_records()), key=lambda item: item["id"])
-            batches = [dict(b) for b in self.db.list_batches()]
+            records = sorted((dict(r) for r in self.db.list_records() if str(r["year"]) == year),
+                             key=lambda item: item["id"])
+            batches = [dict(b) for b in self.db.list_batches() if str(b["year"]) == year]
             with tempfile.TemporaryDirectory() as temp_dir:
                 preview_path = Path(temp_dir) / "preview.xlsx"
                 export_report(template, preview_path, records, batches)
@@ -773,7 +784,7 @@ class MainWindow(QMainWindow):
             export_report(template, output, records, batches)
             QMessageBox.information(
                 self, "Экспорт готов",
-                f"Файл создан:\n{output}\n\nВсе исходные листы шаблона сохранены."
+                f"Файл создан:\n{output}\n\nГод отчётности: {year}. Все исходные листы шаблона сохранены."
             )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка экспорта", str(exc))
