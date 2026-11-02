@@ -212,7 +212,7 @@ class Database:
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
-        values = [data.get(k) for k in fields]
+        values = [data.get(k, current[k] if current else None) for k in fields]
         values[2] = int(values[2] or date.today().year)
         values[6:12] = [self._date(v) for v in values[6:12]]
         values[5] = int(values[5] or 0)
