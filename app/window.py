@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+import tempfile
+from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
 from PySide6.QtWidgets import (
@@ -200,6 +202,157 @@ class BatchDialog(QDialog):
             QMessageBox.warning(self, "Не заполнены данные", "Укажите исполнителя и месяц.")
             return
         super().accept()
+
+
+class BatchManagerDialog(QDialog):
+    HEADERS = [
+        "Исполнитель", "Месяц", "Организаций", "Первичка отдана",
+        "Первичка возвращена", "Отчёт по первичке сдан", "Первичка оплачена",
+        "Отчёт по админке сдан", "Админка оплачена", "Комментарий",
+    ]
+    FIELDS = [
+        "primary_given_date", "primary_returned_date", "primary_report_date",
+        "primary_paid_date", "admin_report_date", "admin_paid_date",
+    ]
+
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("Контроль партий")
+        self.resize(1450, 650)
+        layout = QVBoxLayout(self)
+        hint = QLabel("Даты вводите в формате ДД.ММ.ГГГГ. Изменения сохраняются одной кнопкой.")
+        layout.addWidget(hint)
+        self.table = QTableWidget(0, len(self.HEADERS))
+        self.table.setHorizontalHeaderLabels(self.HEADERS)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.table)
+        self._load_rows()
+        buttons = QHBoxLayout()
+        add = QPushButton("Добавить партию")
+        save = QPushButton("Сохранить изменения")
+        close = QPushButton("Закрыть")
+        add.clicked.connect(self.add_batch)
+        save.clicked.connect(self.save)
+        close.clicked.connect(self.accept)
+        buttons.addWidget(add)
+        buttons.addStretch()
+        buttons.addWidget(save)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+
+    def _load_rows(self):
+        batches = [dict(row) for row in self.db.list_batches()]
+        self.table.setRowCount(len(batches))
+        records = self.db.list_records()
+        counts = {}
+        for rec in records:
+            key = (rec["executor"], rec["month"])
+            counts[key] = counts.get(key, 0) + 1
+        for r, batch in enumerate(batches):
+            values = [batch["executor"], batch["month"], counts.get((batch["executor"], batch["month"]), 0)]
+            values += [_display_date(batch.get(field)) for field in self.FIELDS]
+            values += [batch.get("comment") or ""]
+            for c, value in enumerate(values):
+                item = QTableWidgetItem(str(value if value is not None else ""))
+                if c == 2:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(r, c, item)
+
+    def add_batch(self):
+        value, ok = QInputDialog.getText(
+            self, "Новая партия", "Введите исполнителя и месяц через дефис (например: Лилия - февраль):"
+        )
+        if not ok or not value.strip():
+            return
+        parts = value.rsplit("-", 1)
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            QMessageBox.warning(self, "Неверный формат", "Укажите исполнителя и месяц через дефис.")
+            return
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        values = [parts[0].strip(), parts[1].strip().casefold(), "0"] + [""] * 7
+        for c, value in enumerate(values):
+            self.table.setItem(row, c, QTableWidgetItem(value))
+
+    @staticmethod
+    def _to_iso(value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt).date().isoformat()
+            except ValueError:
+                pass
+        raise ValueError(f"Неверная дата «{value}». Используйте ДД.ММ.ГГГГ.")
+
+    def save(self):
+        try:
+            for r in range(self.table.rowCount()):
+                executor = self.table.item(r, 0).text().strip()
+                month = self.table.item(r, 1).text().strip().casefold()
+                if not executor or not month:
+                    raise ValueError(f"Не заполнены исполнитель или месяц в строке {r + 1}.")
+                data = {"executor": executor, "month": month,
+                        "comment": self.table.item(r, 9).text().strip()}
+                for i, field in enumerate(self.FIELDS, 3):
+                    data[field] = self._to_iso(self.table.item(r, i).text())
+                self.db.save_batch(data)
+            QMessageBox.information(self, "Сохранено", "Данные по партиям обновлены.")
+            self.accept()
+        except Exception as exc:
+            QMessageBox.warning(self, "Не удалось сохранить", str(exc))
+
+
+class ReportPreviewDialog(QDialog):
+    SHEETS = [
+        ("2026 Реестр", "Реестр"),
+        ("2026 Сводка по партиям", "Партии"),
+        ("2026 Отчёт руководителю", "Отчёт руководителю"),
+        ("2026 Годовой отчет", "Годовой отчёт"),
+    ]
+
+    def __init__(self, parent, workbook_path):
+        super().__init__(parent)
+        self.setWindowTitle("Предпросмотр отчётности")
+        self.resize(1350, 760)
+        layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        wb = load_workbook(workbook_path, data_only=False, read_only=True)
+        for sheet_name, title in self.SHEETS:
+            if sheet_name not in wb.sheetnames:
+                continue
+            ws = wb[sheet_name]
+            table = QTableWidget()
+            max_rows = min(ws.max_row, 250)
+            max_cols = min(ws.max_column, 20)
+            table.setRowCount(max_rows)
+            table.setColumnCount(max_cols)
+            table.setHorizontalHeaderLabels([
+                str(ws.cell(1, c).value or f"Столбец {c}") for c in range(1, max_cols + 1)
+            ])
+            for r in range(1, max_rows + 1):
+                for c in range(1, max_cols + 1):
+                    value = ws.cell(r, c).value
+                    if value is not None:
+                        table.setItem(r - 1, c - 1, QTableWidgetItem(str(value)))
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            table.setAlternatingRowColors(True)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.tabs.addTab(table, title)
+        wb.close()
+        layout.addWidget(self.tabs)
+        note = QLabel("Показаны первые 250 строк каждого листа. Итоговый Excel сохранит все строки и листы шаблона.")
+        layout.addWidget(note)
+        buttons = QHBoxLayout()
+        close = QPushButton("Закрыть")
+        close.clicked.connect(self.reject)
+        buttons.addStretch()
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
 
 
 class MainWindow(QMainWindow):
@@ -474,19 +627,9 @@ class MainWindow(QMainWindow):
             self.refresh_table()
 
     def manage_batches(self):
-        batches = self.db.list_batches()
-        labels = [f'{b["executor"]} — {b["month"]}' for b in batches]
-        options = ["Добавить / изменить партию"] + labels
-        choice, ok = QInputDialog.getItem(self, "Контроль партий", "Выберите партию:", options, 0, False)
-        if not ok:
-            return
-        data = None
-        if choice != options[0]:
-            data = dict(batches[options.index(choice) - 1])
-        dialog = BatchDialog(self, self.db.list_executors(), data)
+        dialog = BatchManagerDialog(self, self.db)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.db.save_batch(dialog.data())
-            self.statusBar().showMessage("Данные партии сохранены.", 5000)
+            self.statusBar().showMessage("Данные партий сохранены.", 5000)
 
     def import_archive(self):
         default = ARCHIVE_JOURNAL_DEFAULT if Path(ARCHIVE_JOURNAL_DEFAULT).exists() else str(APP_DATA)
@@ -544,14 +687,19 @@ class MainWindow(QMainWindow):
                 return
             self.db.set_setting("report_template", template)
         default_name = str(Path(template).with_name(f"Отчёт_YURKON_{date.today():%Y-%m-%d}.xlsx"))
-        output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default_name, "Excel (*.xlsx)")
-        if not output:
-            return
-        if not output.lower().endswith(".xlsx"):
-            output += ".xlsx"
         try:
             records = sorted((dict(r) for r in self.db.list_records()), key=lambda item: item["id"])
             batches = [dict(b) for b in self.db.list_batches()]
+            with tempfile.TemporaryDirectory() as temp_dir:
+                preview_path = Path(temp_dir) / "preview.xlsx"
+                export_report(template, preview_path, records, batches)
+                preview = ReportPreviewDialog(self, preview_path)
+                preview.exec()
+            output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default_name, "Excel (*.xlsx)")
+            if not output:
+                return
+            if not output.lower().endswith(".xlsx"):
+                output += ".xlsx"
             export_report(template, output, records, batches)
             QMessageBox.information(
                 self, "Экспорт готов",
