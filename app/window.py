@@ -233,7 +233,7 @@ class BatchManagerDialog(QDialog):
         self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(14, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(15, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self._load_rows()
         buttons = QHBoxLayout()
@@ -255,7 +255,7 @@ class BatchManagerDialog(QDialog):
         records = self.db.list_records()
         aggregates = {}
         for rec in records:
-            key = (rec["executor"], rec["month"])
+            key = (rec["executor"], rec["month"], rec["year"])
             item = aggregates.setdefault(key, {"count": 0, "workplaces": 0, "admin_count": 0})
             item["count"] += 1
             item["workplaces"] += int(rec["workplaces"] or 0)
@@ -303,11 +303,11 @@ class BatchManagerDialog(QDialog):
         if len(parts) != 2 or not all(part.strip() for part in parts):
             QMessageBox.warning(self, "Неверный формат", "Укажите исполнителя и месяц через дефис.")
             return
-        row = self.table.rowCount()
-        self.table.insertRow(row)
         year, ok = QInputDialog.getInt(self, "Год партии", "Год:", date.today().year, 2000, 2100)
         if not ok:
             return
+        row = self.table.rowCount()
+        self.table.insertRow(row)
         values = [parts[0].strip(), parts[1].strip().casefold(), str(year), "Не передана", "0",
                   "", "", "0", "0", "", "", "0", "0", "", "", ""]
         for c, value in enumerate(values):
@@ -453,7 +453,10 @@ class MainWindow(QMainWindow):
         search_row.addWidget(QLabel("Поиск"))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Организация, протокол, исполнитель, месяц, год или индекс дела")
-        self.search.textChanged.connect(self.refresh_table)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self.refresh_table)
+        self.search.textChanged.connect(lambda _text: self._search_timer.start(250))
         search_row.addWidget(self.search)
         layout.addLayout(search_row)
 
@@ -487,7 +490,7 @@ class MainWindow(QMainWindow):
         self._filter_values_cache = {}
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self.summary = QLabel()
         layout.addWidget(self.summary)
@@ -560,16 +563,18 @@ class MainWindow(QMainWindow):
                     self._filter_values_cache[key] = values
             for key in ("assembled", "scanned", "yandex"):
                 combo = self.filter_boxes[key]
-                selected = combo.currentText()
-                combo.blockSignals(True)
-                combo.clear()
-                combo.addItem("Все", "")
-                combo.addItem("Есть", "yes")
-                combo.addItem("Нет", "no")
-                idx = combo.findText(selected)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
-                combo.blockSignals(False)
+                if self._filter_values_cache.get(key) != ["yes", "no"]:
+                    selected = combo.currentData()
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItem("Все", "")
+                    combo.addItem("Есть", "yes")
+                    combo.addItem("Нет", "no")
+                    idx = combo.findData(selected)
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+                    combo.blockSignals(False)
+                    self._filter_values_cache[key] = ["yes", "no"]
             filtered = []
             for record in rows:
                 ok = True
@@ -729,6 +734,7 @@ class MainWindow(QMainWindow):
             return
         try:
             result = self.db.import_legacy_workbook(path)
+            self.db.set_setting("report_template", path)
             self.refresh_table()
             QMessageBox.information(
                 self, "Загрузка завершена",
