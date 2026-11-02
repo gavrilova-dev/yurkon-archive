@@ -648,11 +648,13 @@ class MainWindow(QMainWindow):
             row = item.row()
             if item.column() == 12:
                 admin_item = self.table.item(row, 9)
+                old_amount = int(admin_item.text() or 0) if admin_item else 0
+                new_amount = 100 if stamp else 0
                 if admin_item:
-                    admin_item.setText("100" if stamp else "0")
+                    admin_item.setText(str(new_amount))
                 # Update the visible summary only; do not reload the full registry.
                 if hasattr(self, "_visible_admin_total"):
-                    self._visible_admin_total += 100 if stamp else -100
+                    self._visible_admin_total += new_amount - old_amount
                     self.summary.setText(self.summary.text().split(" · Админ. работа:")[0] +
                                          f" · Админ. работа: {self._visible_admin_total:,} ₽".replace(",", " "))
         except Exception as exc:
