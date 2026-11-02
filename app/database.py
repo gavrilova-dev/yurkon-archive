@@ -122,7 +122,7 @@ class Database:
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k) for k in fields]
-        values[5:10] = [self._date(v) for v in values[5:10]]
+        values[5:11] = [self._date(v) for v in values[5:11]]
         values[4] = int(values[4] or 0)
         cur = self.connection.execute(
             f"INSERT INTO primary_records({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
@@ -135,10 +135,10 @@ class Database:
         fields = (
             "executor", "month", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
-            "scanned_date", "pdf_path", "notes",
+            "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k) for k in fields]
-        values[5:10] = [self._date(v) for v in values[5:10]]
+        values[5:11] = [self._date(v) for v in values[5:11]]
         values[4] = int(values[4] or 0)
         assignments = ",".join(f"{k}=?" for k in fields)
         self.connection.execute(
