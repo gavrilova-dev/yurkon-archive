@@ -575,14 +575,9 @@ class MainWindow(QMainWindow):
             return
         try:
             destination = self.file_manager.move_pdf(self.current_pdf, rec["archive_index"])
-            self.db.connection.execute("""
-                UPDATE primary_records SET scanned_date=?,pdf_path=?,updated_at=CURRENT_TIMESTAMP
-                WHERE id=(SELECT id FROM primary_records
-                          WHERE lower(trim(protocol))=lower(trim(?))
-                            AND lower(trim(organization))=lower(trim(?))
-                          ORDER BY id DESC LIMIT 1)
-            """, (date.today().isoformat(), str(destination), rec["protocol"], rec["organization"]))
-            self.db.connection.commit()
+            self.db.mark_scanned(
+                rec["protocol"], rec["organization"], str(destination), date.today().isoformat()
+            )
             QMessageBox.information(self, "Готово", f"Файл сохранён:\n{destination}")
             self.current_pdf = None
             self.current_archive_record = None
