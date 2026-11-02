@@ -706,7 +706,9 @@ class MainWindow(QMainWindow):
             self.refresh_table()
             QMessageBox.information(
                 self, "Загрузка завершена",
-                f'Добавлено записей: {result["imported"]}\nПовторная загрузка той же книги не создаст дубликаты.'
+                f'Добавлено записей: {result["imported"]}\n'
+                f'Отмечено «Документы собраны» и «Отсканированы»: {result["statuses_updated"]}\n'
+                f'Повторная загрузка той же книги не создаст дубликаты.'
             )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка переноса", str(exc))
