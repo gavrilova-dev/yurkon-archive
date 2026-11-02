@@ -73,6 +73,41 @@ class DatabaseTests(unittest.TestCase):
         self.db.update_record(record_id, record)
         self.assertEqual(self.db.get_record(record_id)["assembled_date"], "2026-11-02")
 
+    def test_same_executor_and_month_can_exist_in_different_years(self):
+        self.db.add_record({
+            "executor":"Лилия","month":"январь","year":2026,
+            "protocol":"100/2026","organization":"ООО Альфа","workplaces":1
+        })
+        self.db.add_record({
+            "executor":"Лилия","month":"январь","year":2027,
+            "protocol":"100/2027","organization":"ООО Бета","workplaces":2
+        })
+        batches = self.db.list_batches()
+        self.assertEqual(len(batches), 2)
+        self.assertEqual({row["year"] for row in batches}, {2026, 2027})
+
+    def test_scanned_status_also_marks_admin_work_done(self):
+        record_id = self.db.add_record({
+            "executor":"Аня","month":"ноябрь","year":2026,
+            "protocol":"1001/2026","organization":"ООО Тест","workplaces":1
+        })
+        self.db.update_status(record_id, "scanned_date", "2026-11-02")
+        record = self.db.get_record(record_id)
+        self.assertEqual(record["scanned_date"], "2026-11-02")
+        self.assertEqual(record["admin_done_date"], "2026-11-02")
+
+    def test_archive_index_lookup_uses_protocol_not_organization_name(self):
+        self.db.add_record({
+            "executor":"Анна","month":"ноябрь","year":2026,
+            "protocol":"555/2026","organization":"Название организации изменилось","workplaces":1
+        })
+        self.db.import_archive_rows([{
+            "archive_index":"ИЛ-10-0555/2026","organization":"Старое название",
+            "protocol":"555/2026","source_row":4
+        }])
+        record = self.db.list_records()[0]
+        self.assertEqual(record["archive_index"], "ИЛ-10-0555/2026")
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
