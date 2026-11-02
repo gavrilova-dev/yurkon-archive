@@ -17,7 +17,10 @@ class ReportExporterTests(unittest.TestCase):
                        "Первичка: моя доля (по 10 ₽)","Админ. работа выполнена (дата)",
                        "Админ. сумма (100 ₽)","Столбец1"])
             wb.create_sheet("2026 Сводка по партиям")
-            wb.create_sheet("2026 Годовой отчет")
+            yearly = wb.create_sheet("2026 Годовой отчет")
+            yearly["A24"] = "Статус оплаты (по партиям)"
+            yearly["A26"] = "Первичка: оплачено"
+            yearly["B26"] = "=SUMIF(Свод2026[Первичка: оплачено (дата)],\"<>\",Свод2026[Первичка: сумма к получению (20 ₽)])"
             wb.create_sheet("2026 Отчёт руководителю")
             wb.create_sheet("Инструкция")
             wb.create_sheet("Списки")
@@ -33,6 +36,8 @@ class ReportExporterTests(unittest.TestCase):
             self.assertEqual(result["2026 Реестр"]["F2"].value, "ООО Тест")
             self.assertEqual(result["2026 Реестр"]["H2"].value, '=IF(G2="","",G2*20)')
             self.assertNotIn("Индекс дела", [result["2026 Реестр"].cell(1,c).value for c in range(1,13)])
+            self.assertEqual(result["2026 Годовой отчет"]["A24"].value, "Статус оплаты (по партиям)")
+            self.assertEqual(result["2026 Годовой отчет"]["A26"].value, "Первичка: оплачено")
 
 if __name__ == "__main__":
     unittest.main()
