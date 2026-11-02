@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QDate
+from PySide6.QtCore import Qt, QTimer, QDate, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
@@ -206,6 +206,7 @@ class BatchDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    scan_files_changed = Signal()
     COLUMNS = [
         ("executor", "Исполнитель"), ("month", "Месяц"), ("protocol", "№ протокола"),
         ("organization", "Организация"), ("workplaces", "Мест"),
@@ -226,7 +227,8 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.refresh_table()
         self.refresh_scan_queue()
-        self.watcher = FileWatcher(INCOMING_FOLDER, lambda: QTimer.singleShot(0, self.refresh_scan_queue))
+        self.scan_files_changed.connect(self.refresh_scan_queue)
+        self.watcher = FileWatcher(INCOMING_FOLDER, self.scan_files_changed.emit)
         self.watcher.start()
         self.statusBar().showMessage(
             f"База: {DATABASE_PATH} · Записей архива: {self.db.archive_count()}"
