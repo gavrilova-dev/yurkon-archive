@@ -470,7 +470,7 @@ class MainWindow(QMainWindow):
         if not output.lower().endswith(".xlsx"):
             output += ".xlsx"
         try:
-            records = [dict(r) for r in self.db.list_records()]
+            records = sorted((dict(r) for r in self.db.list_records()), key=lambda item: item["id"])
             batches = [dict(b) for b in self.db.list_batches()]
             export_report(template, output, records, batches)
             QMessageBox.information(
