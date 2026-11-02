@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 import re
-from difflib import SequenceMatcher
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ class Database:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             executor TEXT NOT NULL DEFAULT '',
             month TEXT NOT NULL DEFAULT '',
+            year INTEGER NOT NULL DEFAULT 2026,
             protocol TEXT NOT NULL DEFAULT '',
             organization TEXT NOT NULL DEFAULT '',
             workplaces INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +62,7 @@ class Database:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             executor TEXT NOT NULL,
             month TEXT NOT NULL,
+            year INTEGER NOT NULL DEFAULT 2026,
             primary_given_date TEXT,
             primary_returned_date TEXT,
             primary_report_date TEXT,
@@ -69,7 +70,7 @@ class Database:
             admin_report_date TEXT,
             admin_paid_date TEXT,
             comment TEXT NOT NULL DEFAULT '',
-            UNIQUE(executor, month)
+            UNIQUE(executor, month, year)
         );
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -79,6 +80,37 @@ class Database:
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(primary_records)")}
         if "yandex_uploaded_date" not in columns:
             self.connection.execute("ALTER TABLE primary_records ADD COLUMN yandex_uploaded_date TEXT")
+        if "year" not in columns:
+            self.connection.execute("ALTER TABLE primary_records ADD COLUMN year INTEGER NOT NULL DEFAULT 2026")
+        batch_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(batches)")}
+        if "year" not in batch_columns:
+            self.connection.execute("ALTER TABLE batches RENAME TO batches_old")
+            self.connection.execute("""
+                CREATE TABLE batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    executor TEXT NOT NULL,
+                    month TEXT NOT NULL,
+                    year INTEGER NOT NULL DEFAULT 2026,
+                    primary_given_date TEXT,
+                    primary_returned_date TEXT,
+                    primary_report_date TEXT,
+                    primary_paid_date TEXT,
+                    admin_report_date TEXT,
+                    admin_paid_date TEXT,
+                    comment TEXT NOT NULL DEFAULT '',
+                    UNIQUE(executor, month, year)
+                )
+            """)
+            self.connection.execute("""
+                INSERT INTO batches(id,executor,month,year,primary_given_date,primary_returned_date,
+                    primary_report_date,primary_paid_date,admin_report_date,admin_paid_date,comment)
+                SELECT id,executor,month,2026,primary_given_date,primary_returned_date,
+                    primary_report_date,primary_paid_date,admin_report_date,admin_paid_date,comment
+                FROM batches_old
+            """)
+            self.connection.execute("DROP TABLE batches_old")
+        self.connection.execute("CREATE INDEX IF NOT EXISTS idx_primary_year ON primary_records(year)")
+        self.connection.execute("CREATE INDEX IF NOT EXISTS idx_archive_protocol_norm ON archive_records(protocol_norm)")
         self.connection.commit()
 
     @staticmethod
@@ -146,14 +178,15 @@ class Database:
                 f'партия: {duplicate["month"]}). Проверьте запись перед добавлением.'
             )
         fields = (
-            "executor", "month", "protocol", "organization", "workplaces",
+            "executor", "month", "year", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k) for k in fields]
-        values[5:11] = [self._date(v) for v in values[5:11]]
-        values[4] = int(values[4] or 0)
-        values[12] = values[12] or ""
+        values[2] = int(values[2] or date.today().year)
+        values[6:12] = [self._date(v) for v in values[6:12]]
+        values[5] = int(values[5] or 0)
+        values[13] = values[13] or ""
         cur = self.connection.execute(
             f"INSERT INTO primary_records({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
             values,
@@ -175,14 +208,15 @@ class Database:
                     f'партия: {duplicate["month"]}).'
                 )
         fields = (
-            "executor", "month", "protocol", "organization", "workplaces",
+            "executor", "month", "year", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k) for k in fields]
-        values[5:11] = [self._date(v) for v in values[5:11]]
-        values[4] = int(values[4] or 0)
-        values[12] = values[12] or ""
+        values[2] = int(values[2] or date.today().year)
+        values[6:12] = [self._date(v) for v in values[6:12]]
+        values[5] = int(values[5] or 0)
+        values[13] = values[13] or ""
         assignments = ",".join(f"{k}=?" for k in fields)
         self.connection.execute(
             f"UPDATE primary_records SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -193,8 +227,8 @@ class Database:
 
     def ensure_batches_for_records(self) -> None:
         self.connection.execute("""
-            INSERT OR IGNORE INTO batches(executor, month)
-            SELECT DISTINCT executor, month FROM primary_records
+            INSERT OR IGNORE INTO batches(executor, month, year)
+            SELECT DISTINCT executor, month, year FROM primary_records
             WHERE executor<>'' AND month<>''
         """)
         self.connection.commit()
@@ -212,36 +246,17 @@ class Database:
                 "SELECT * FROM primary_records ORDER BY id DESC"
             )
         ]
-        archive_rows = list(self.connection.execute(
-            "SELECT archive_index,protocol_norm,organization_norm,organization FROM archive_records"
-        ))
-        by_protocol = {}
-        exact_map = {}
-        for archive in archive_rows:
-            protocol_key = self._norm(archive["protocol_norm"]).replace(" ", "").replace("ё", "е")
-            org_key = self._org_norm(archive["organization"])
-            by_protocol.setdefault(protocol_key, []).append(archive)
-            exact_map[(protocol_key, org_key)] = archive["archive_index"]
-
+        archive_rows = self.connection.execute("""
+            SELECT protocol_norm, MIN(archive_index) AS archive_index
+            FROM archive_records GROUP BY protocol_norm
+        """).fetchall()
+        by_protocol = {
+            self._norm(row["protocol_norm"]).replace(" ", "").replace("ё", "е"): row["archive_index"]
+            for row in archive_rows
+        }
         for record in records:
             protocol_key = self._norm(record["protocol"]).replace(" ", "").replace("ё", "е")
-            org_key = self._org_norm(record["organization"])
-            index = exact_map.get((protocol_key, org_key))
-            if not index:
-                candidates = by_protocol.get(protocol_key, [])
-                if len(candidates) == 1:
-                    index = candidates[0]["archive_index"]
-                elif candidates:
-                    ranked = sorted(
-                        ((SequenceMatcher(None, org_key, self._org_norm(item["organization"])).ratio(), item)
-                         for item in candidates),
-                        key=lambda pair: pair[0], reverse=True,
-                    )
-                    if ranked and ranked[0][0] >= 0.92 and (
-                        len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.08
-                    ):
-                        index = ranked[0][1]["archive_index"]
-            record["archive_index"] = index
+            record["archive_index"] = by_protocol.get(protocol_key)
 
         query = self._norm(search)
         if query:
@@ -335,20 +350,39 @@ class Database:
         return int(self.connection.execute("SELECT COUNT(*) FROM archive_records").fetchone()[0])
 
     def save_batch(self, data: dict[str, Any]) -> None:
-        fields = ("executor","month","primary_given_date","primary_returned_date",
+        fields = ("executor","month","year","primary_given_date","primary_returned_date",
                   "primary_report_date","primary_paid_date","admin_report_date","admin_paid_date","comment")
         values = [data.get(k) for k in fields]
-        values[2:8] = [self._date(v) for v in values[2:8]]
+        values[2] = int(values[2] or date.today().year)
+        values[3:9] = [self._date(v) for v in values[3:9]]
         self.connection.execute(
             f"""INSERT INTO batches({','.join(fields)}) VALUES({','.join('?' for _ in fields)})
                 ON CONFLICT(executor,month) DO UPDATE SET
-                {','.join(f'{k}=excluded.{k}' for k in fields[2:])}""",
+                {','.join(f'{k}=excluded.{k}' for k in fields[3:])}""",
             values,
         )
         self.connection.commit()
 
     def list_batches(self) -> list[sqlite3.Row]:
-        return list(self.connection.execute("SELECT * FROM batches ORDER BY id"))
+        return list(self.connection.execute("SELECT * FROM batches ORDER BY year DESC, id"))
+
+    def update_status(self, record_id: int, field: str, value: str | None) -> None:
+        allowed = {"assembled_date", "scanned_date", "yandex_uploaded_date"}
+        if field not in allowed:
+            raise ValueError("Недопустимое поле статуса.")
+        stamp = self._date(value)
+        with self.connection:
+            if field == "scanned_date":
+                self.connection.execute("""
+                    UPDATE primary_records
+                    SET scanned_date=?, admin_done_date=?, updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?
+                """, (stamp, stamp, record_id))
+            else:
+                self.connection.execute(
+                    f"UPDATE primary_records SET {field}=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (stamp, record_id),
+                )
 
     def import_legacy_workbook(self, path: str | Path) -> dict[str, int]:
         from openpyxl import load_workbook
@@ -382,6 +416,7 @@ class Database:
                 data = {
                     "executor": str(executor or ""),
                     "month": str(month or "").casefold(),
+                    "year": 2026,
                     "protocol": str(protocol).strip(),
                     "organization": str(organization).strip(),
                     "workplaces": workplaces,
@@ -389,13 +424,13 @@ class Database:
                 }
                 self.connection.execute("""
                     INSERT INTO primary_records
-                    (executor,month,protocol,organization,workplaces,admin_done_date,assembled_date,scanned_date)
-                    SELECT ?,?,?,?,?,?,?,?
+                    (executor,month,year,protocol,organization,workplaces,admin_done_date,assembled_date,scanned_date)
+                    SELECT ?,?,?,?,?,?,?,?,?
                     WHERE NOT EXISTS (
                       SELECT 1 FROM primary_records
                       WHERE protocol=? AND organization=? AND executor=? AND month=?
                     )
-                """, (data["executor"],data["month"],data["protocol"],data["organization"],
+                """, (data["executor"],data["month"],data["year"],data["protocol"],data["organization"],
                       workplaces,self._date(data["admin_done_date"]),status_date,status_date,
                       data["protocol"],data["organization"],data["executor"],data["month"]))
                 imported += self.connection.execute("SELECT changes()").fetchone()[0]
@@ -420,7 +455,7 @@ class Database:
                 if len(parts) != 2:
                     continue
                 self.save_batch({
-                    "executor": parts[0].strip(), "month": parts[1].strip().casefold(),
+                    "executor": parts[0].strip(), "month": parts[1].strip().casefold(), "year": 2026,
                     "primary_given_date": sw.cell(r,3).value,
                     "primary_returned_date": sw.cell(r,4).value,
                     "primary_report_date": sw.cell(r,7).value,
