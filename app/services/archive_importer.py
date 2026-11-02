@@ -30,13 +30,21 @@ def read_archive_journal(path: str | Path) -> list[dict]:
     result = []
     max_col = max(index_col, org_col, protocol_col)
     for row_num, values in enumerate(
-        ws.iter_rows(min_row=header_row + 2, min_col=1, max_col=max_col, values_only=True),
-        start=header_row + 2,
+        ws.iter_rows(min_row=header_row + 1, min_col=1, max_col=max_col, values_only=True),
+        start=header_row + 1,
     ):
         idx = values[index_col - 1]
         org = values[org_col - 1]
         protocol = values[protocol_col - 1]
-        if idx and org and protocol:
+        # Some journal exports insert a numeric helper row directly below headers.
+        # Skip only that row, not the first real organization if the helper row is absent.
+        numeric_helper = all(
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+            for value in (idx, org, protocol)
+        )
+        if numeric_helper:
+            continue
+        if idx not in (None, "") and org not in (None, "") and protocol not in (None, ""):
             result.append({
                 "archive_index": str(idx).strip(),
                 "organization": str(org).strip(),
