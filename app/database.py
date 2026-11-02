@@ -358,6 +358,7 @@ class Database:
             raise ValueError("В книге нет листа «2026 Реестр».")
         ws = wb["2026 Реестр"]
         imported = 0
+        statuses_updated = 0
         with self.connection:
             for r in range(2, ws.max_row + 1):
                 executor, month = ws.cell(r,2).value, ws.cell(r,3).value
@@ -406,6 +407,7 @@ class Database:
                         WHERE protocol=? AND organization=? AND executor=? AND month=?
                     """, (status_date,status_date,data["protocol"],data["organization"],
                           data["executor"],data["month"]))
+                    statuses_updated += self.connection.execute("SELECT changes()").fetchone()[0]
 
         self.ensure_batches_for_records()
         if "2026 Сводка по партиям" in wb.sheetnames:
@@ -427,4 +429,5 @@ class Database:
                     "admin_paid_date": sw.cell(r,12).value,
                     "comment": sw.cell(r,13).value or "",
                 })
-        return {"imported": imported}
+        wb.close()
+        return {"imported": imported, "statuses_updated": statuses_updated}
