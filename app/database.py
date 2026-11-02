@@ -357,7 +357,7 @@ class Database:
         values[3:9] = [self._date(v) for v in values[3:9]]
         self.connection.execute(
             f"""INSERT INTO batches({','.join(fields)}) VALUES({','.join('?' for _ in fields)})
-                ON CONFLICT(executor,month) DO UPDATE SET
+                ON CONFLICT(executor,month,year) DO UPDATE SET
                 {','.join(f'{k}=excluded.{k}' for k in fields[3:])}""",
             values,
         )
@@ -428,20 +428,20 @@ class Database:
                     SELECT ?,?,?,?,?,?,?,?,?
                     WHERE NOT EXISTS (
                       SELECT 1 FROM primary_records
-                      WHERE protocol=? AND organization=? AND executor=? AND month=?
+                      WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
                     )
                 """, (data["executor"],data["month"],data["year"],data["protocol"],data["organization"],
                       workplaces,self._date(data["admin_done_date"]),status_date,status_date,
-                      data["protocol"],data["organization"],data["executor"],data["month"]))
+                      data["protocol"],data["organization"],data["executor"],data["month"],data["year"]))
                 imported += self.connection.execute("SELECT changes()").fetchone()[0]
                 if paid_100:
                     self.connection.execute("""
                         UPDATE primary_records
                         SET assembled_date=COALESCE(assembled_date,?),
                             scanned_date=COALESCE(scanned_date,?)
-                        WHERE protocol=? AND organization=? AND executor=? AND month=?
+                        WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
                     """, (status_date,status_date,data["protocol"],data["organization"],
-                          data["executor"],data["month"]))
+                          data["executor"],data["month"],data["year"]))
                     statuses_updated += self.connection.execute("SELECT changes()").fetchone()[0]
 
         self.ensure_batches_for_records()
