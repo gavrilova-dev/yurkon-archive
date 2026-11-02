@@ -489,7 +489,13 @@ class MainWindow(QMainWindow):
         self.table.itemChanged.connect(self.update_status_from_table)
         self._filter_values_cache = {}
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Avoid ResizeToContents over thousands of rows on every refresh.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for column, width in {
+            1: 125, 2: 95, 3: 65, 4: 115, 5: 260, 6: 65, 7: 105,
+            8: 100, 9: 90, 10: 150, 11: 110, 12: 110, 13: 110,
+        }.items():
+            self.table.setColumnWidth(column, width)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self.summary = QLabel()
