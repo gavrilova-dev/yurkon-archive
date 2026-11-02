@@ -124,6 +124,7 @@ class Database:
         values = [data.get(k) for k in fields]
         values[5:11] = [self._date(v) for v in values[5:11]]
         values[4] = int(values[4] or 0)
+        values[12] = values[12] or ""
         cur = self.connection.execute(
             f"INSERT INTO primary_records({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
             values,
@@ -140,6 +141,7 @@ class Database:
         values = [data.get(k) for k in fields]
         values[5:11] = [self._date(v) for v in values[5:11]]
         values[4] = int(values[4] or 0)
+        values[12] = values[12] or ""
         assignments = ",".join(f"{k}=?" for k in fields)
         self.connection.execute(
             f"UPDATE primary_records SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE id=?",
