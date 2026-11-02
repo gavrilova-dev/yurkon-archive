@@ -32,6 +32,7 @@ class Database:
             returned_date TEXT,
             signed_date TEXT,
             scanned_date TEXT,
+            yandex_uploaded_date TEXT,
             pdf_path TEXT,
             notes TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -73,6 +74,9 @@ class Database:
             value TEXT NOT NULL
         );
         """)
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(primary_records)")}
+        if "yandex_uploaded_date" not in columns:
+            self.connection.execute("ALTER TABLE primary_records ADD COLUMN yandex_uploaded_date TEXT")
         self.connection.commit()
 
     @staticmethod
@@ -86,6 +90,16 @@ class Database:
         if isinstance(value, (datetime, date)):
             return value.date().isoformat() if isinstance(value, datetime) else value.isoformat()
         return str(value).strip()
+
+    def backup_to(self, path: str | Path) -> Path:
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        target = sqlite3.connect(destination)
+        try:
+            self.connection.backup(target)
+        finally:
+            target.close()
+        return destination
 
     def close(self) -> None:
         self.connection.close()
@@ -105,7 +119,7 @@ class Database:
         fields = (
             "executor", "month", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
-            "scanned_date", "pdf_path", "notes",
+            "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k) for k in fields]
         values[5:10] = [self._date(v) for v in values[5:10]]
