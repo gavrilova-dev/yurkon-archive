@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import re
+from difflib import SequenceMatcher
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -84,6 +86,11 @@ class Database:
         return " ".join(str(value or "").strip().casefold().split())
 
     @staticmethod
+    def _org_norm(value: Any) -> str:
+        text = str(value or "").casefold().replace("ё", "е")
+        return re.sub(r"[^0-9a-zа-я]+", "", text)
+
+    @staticmethod
     def _date(value: Any) -> str | None:
         if value in (None, ""):
             return None
@@ -115,7 +122,29 @@ class Database:
         )
         self.connection.commit()
 
+    def find_duplicate_protocol(self, protocol: str, exclude_id: int | None = None):
+        normalized = self._norm(protocol).replace(" ", "").replace("ё", "е")
+        if not normalized:
+            return None
+        rows = self.connection.execute(
+            "SELECT id, protocol, organization, executor, month FROM primary_records ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            if exclude_id is not None and row["id"] == exclude_id:
+                continue
+            candidate = self._norm(row["protocol"]).replace(" ", "").replace("ё", "е")
+            if candidate == normalized:
+                return dict(row)
+        return None
+
     def add_record(self, data: dict[str, Any]) -> int:
+        duplicate = self.find_duplicate_protocol(data.get("protocol", ""))
+        if duplicate:
+            raise ValueError(
+                f'Протокол {duplicate["protocol"]} уже есть в базе: '
+                f'{duplicate["organization"]} (исполнитель: {duplicate["executor"]}, '
+                f'партия: {duplicate["month"]}). Проверьте запись перед добавлением.'
+            )
         fields = (
             "executor", "month", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
@@ -134,6 +163,13 @@ class Database:
         return int(cur.lastrowid)
 
     def update_record(self, record_id: int, data: dict[str, Any]) -> None:
+        duplicate = self.find_duplicate_protocol(data.get("protocol", ""), exclude_id=record_id)
+        if duplicate:
+            raise ValueError(
+                f'Протокол {duplicate["protocol"]} уже есть в базе: '
+                f'{duplicate["organization"]} (исполнитель: {duplicate["executor"]}, '
+                f'партия: {duplicate["month"]}).'
+            )
         fields = (
             "executor", "month", "protocol", "organization", "workplaces",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
@@ -172,18 +208,36 @@ class Database:
                 "SELECT * FROM primary_records ORDER BY id DESC"
             )
         ]
-        archive_map = {}
-        for archive in self.connection.execute(
-            "SELECT archive_index,protocol_norm,organization_norm FROM archive_records"
-        ):
-            archive_map[(archive["protocol_norm"], archive["organization_norm"])] = archive["archive_index"]
+        archive_rows = list(self.connection.execute(
+            "SELECT archive_index,protocol_norm,organization_norm,organization FROM archive_records"
+        ))
+        by_protocol = {}
+        exact_map = {}
+        for archive in archive_rows:
+            protocol_key = self._norm(archive["protocol_norm"]).replace(" ", "").replace("ё", "е")
+            org_key = self._org_norm(archive["organization"])
+            by_protocol.setdefault(protocol_key, []).append(archive)
+            exact_map[(protocol_key, org_key)] = archive["archive_index"]
 
         for record in records:
-            key = (
-                self._norm(record["protocol"]).replace(" ", ""),
-                self._norm(record["organization"]),
-            )
-            record["archive_index"] = archive_map.get(key)
+            protocol_key = self._norm(record["protocol"]).replace(" ", "").replace("ё", "е")
+            org_key = self._org_norm(record["organization"])
+            index = exact_map.get((protocol_key, org_key))
+            if not index:
+                candidates = by_protocol.get(protocol_key, [])
+                if len(candidates) == 1:
+                    index = candidates[0]["archive_index"]
+                elif candidates:
+                    ranked = sorted(
+                        ((SequenceMatcher(None, org_key, self._org_norm(item["organization"])).ratio(), item)
+                         for item in candidates),
+                        key=lambda pair: pair[0], reverse=True,
+                    )
+                    if ranked and ranked[0][0] >= 0.92 and (
+                        len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.08
+                    ):
+                        index = ranked[0][1]["archive_index"]
+            record["archive_index"] = index
 
         query = self._norm(search)
         if query:
