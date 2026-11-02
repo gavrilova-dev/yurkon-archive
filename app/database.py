@@ -290,7 +290,7 @@ class Database:
         self.connection.commit()
 
     def list_batches(self) -> list[sqlite3.Row]:
-        return list(self.connection.execute("SELECT * FROM batches ORDER BY executor,month"))
+        return list(self.connection.execute("SELECT * FROM batches ORDER BY id"))
 
     def import_legacy_workbook(self, path: str | Path) -> dict[str, int]:
         from openpyxl import load_workbook
