@@ -130,6 +130,7 @@ class Database:
             values,
         )
         self.connection.commit()
+        self.ensure_batches_for_records()
         return int(cur.lastrowid)
 
     def update_record(self, record_id: int, data: dict[str, Any]) -> None:
@@ -147,6 +148,15 @@ class Database:
             f"UPDATE primary_records SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE id=?",
             values + [record_id],
         )
+        self.connection.commit()
+        self.ensure_batches_for_records()
+
+    def ensure_batches_for_records(self) -> None:
+        self.connection.execute("""
+            INSERT OR IGNORE INTO batches(executor, month)
+            SELECT DISTINCT executor, month FROM primary_records
+            WHERE executor<>'' AND month<>''
+        """)
         self.connection.commit()
 
     def delete_record(self, record_id: int) -> None:
@@ -300,6 +310,7 @@ class Database:
                       data["protocol"],data["organization"],data["executor"],data["month"]))
                 imported += self.connection.execute("SELECT changes()").fetchone()[0]
 
+        self.ensure_batches_for_records()
         if "2026 Сводка по партиям" in wb.sheetnames:
             sw = wb["2026 Сводка по партиям"]
             for r in range(5, sw.max_row + 1):
