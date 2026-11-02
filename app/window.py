@@ -209,8 +209,8 @@ class MainWindow(QMainWindow):
         ("organization", "Организация"), ("workplaces", "Мест"),
         ("fee", "К получению, ₽"), ("share", "Моя доля, ₽"),
         ("admin", "Админ, ₽"), ("archive_index", "Индекс дела"),
-        ("assembled_date", "Собрано"), ("returned_date", "Возвращено"),
-        ("scanned_date", "Отсканированы"), ("yandex_uploaded_date", "Яндекс.Диск"),
+        ("assembled_date", "Документы собраны"), ("scanned_date", "Отсканированы"),
+        ("yandex_uploaded_date", "Яндекс.Диск"),
     ]
 
     def __init__(self):
