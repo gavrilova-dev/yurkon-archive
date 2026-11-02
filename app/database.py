@@ -367,26 +367,41 @@ class Database:
                     workplaces = int(workplaces)
                 except (TypeError, ValueError):
                     workplaces = 0
+                admin_done = ws.cell(r,10).value
+                admin_fee = ws.cell(r,11).value
+                try:
+                    paid_100 = float(str(admin_fee).replace(",", ".")) == 100.0
+                except (TypeError, ValueError):
+                    paid_100 = False
+                status_date = date.today().isoformat() if paid_100 else None
                 data = {
                     "executor": str(executor or ""),
                     "month": str(month or "").casefold(),
                     "protocol": str(protocol).strip(),
                     "organization": str(organization).strip(),
                     "workplaces": workplaces,
-                    "admin_done_date": ws.cell(r,10).value,
+                    "admin_done_date": admin_done,
                 }
                 self.connection.execute("""
                     INSERT INTO primary_records
-                    (executor,month,protocol,organization,workplaces,admin_done_date)
-                    SELECT ?,?,?,?,?,?
+                    (executor,month,protocol,organization,workplaces,admin_done_date,assembled_date,scanned_date)
+                    SELECT ?,?,?,?,?,?,?,?
                     WHERE NOT EXISTS (
                       SELECT 1 FROM primary_records
                       WHERE protocol=? AND organization=? AND executor=? AND month=?
                     )
                 """, (data["executor"],data["month"],data["protocol"],data["organization"],
-                      workplaces,self._date(data["admin_done_date"]),
+                      workplaces,self._date(data["admin_done_date"]),status_date,status_date,
                       data["protocol"],data["organization"],data["executor"],data["month"]))
                 imported += self.connection.execute("SELECT changes()").fetchone()[0]
+                if paid_100:
+                    self.connection.execute("""
+                        UPDATE primary_records
+                        SET assembled_date=COALESCE(assembled_date,?),
+                            scanned_date=COALESCE(scanned_date,?)
+                        WHERE protocol=? AND organization=? AND executor=? AND month=?
+                    """, (status_date,status_date,data["protocol"],data["organization"],
+                          data["executor"],data["month"]))
 
         self.ensure_batches_for_records()
         if "2026 Сводка по партиям" in wb.sheetnames:
