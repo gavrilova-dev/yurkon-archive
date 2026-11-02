@@ -1,8 +1,5 @@
 from pathlib import Path
 import fitz  # PyMuPDF
-from PIL import Image
-
-
 class PDFService:
 
 
