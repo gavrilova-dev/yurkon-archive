@@ -85,6 +85,9 @@ class RecordDialog(QDialog):
         self.month.setEditable(True)
         self.month.addItems(MONTHS)
         self.month.setCurrentText(str(data.get("month", "")).capitalize())
+        self.year = QSpinBox()
+        self.year.setRange(2000, 2100)
+        self.year.setValue(int(data.get("year") or date.today().year))
 
         self.protocol = QLineEdit(str(data.get("protocol") or ""))
         self.organization = QLineEdit(str(data.get("organization") or ""))
@@ -105,6 +108,7 @@ class RecordDialog(QDialog):
 
         form.addRow("Исполнитель", self.executor)
         form.addRow("Месяц", self.month)
+        form.addRow("Год", self.year)
         form.addRow("Номер протокола", self.protocol)
         form.addRow("Организация", self.organization)
         form.addRow("Рабочих мест", self.workplaces)
@@ -126,6 +130,7 @@ class RecordDialog(QDialog):
         return {
             "executor": self.executor.currentText().strip(),
             "month": self.month.currentText().strip().casefold(),
+            "year": self.year.value(),
             "protocol": self.protocol.text().strip(),
             "organization": self.organization.text().strip(),
             "workplaces": self.workplaces.value(),
@@ -206,7 +211,7 @@ class BatchDialog(QDialog):
 
 class BatchManagerDialog(QDialog):
     HEADERS = [
-        "Исполнитель", "Месяц", "Статус партии", "Организаций", "Первичка отдана",
+        "Исполнитель", "Месяц", "Год", "Статус партии", "Организаций", "Первичка отдана",
         "Первичка возвращена", "К получению, ₽", "Моя доля, ₽",
         "Отчёт по первичке сдан", "Первичка оплачена", "Админ. выполнено",
         "Админ. сумма, ₽", "Отчёт по админке сдан", "Админка оплачена", "Комментарий",
@@ -267,11 +272,11 @@ class BatchManagerDialog(QDialog):
                 status = "В работе"
             else:
                 status = "Не передана"
-            totals = aggregates.get((batch["executor"], batch["month"]), {})
+            totals = aggregates.get((batch["executor"], batch["month"], batch["year"]), {})
             workplaces = totals.get("workplaces", 0)
             admin_count = totals.get("admin_count", 0)
             values = [
-                batch["executor"], batch["month"], status, totals.get("count", 0),
+                batch["executor"], batch["month"], batch["year"], status, totals.get("count", 0),
                 _display_date(batch.get("primary_given_date")),
                 _display_date(batch.get("primary_returned_date")),
                 workplaces * 20, workplaces * 10,
@@ -284,7 +289,7 @@ class BatchManagerDialog(QDialog):
             ]
             for c, value in enumerate(values):
                 item = QTableWidgetItem(str(value if value is not None else ""))
-                if c in (2, 3, 6, 7, 10, 11):
+                if c in (3, 4, 7, 8, 11, 12):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, c, item)
 
@@ -300,7 +305,10 @@ class BatchManagerDialog(QDialog):
             return
         row = self.table.rowCount()
         self.table.insertRow(row)
-        values = [parts[0].strip(), parts[1].strip().casefold(), "Не передана", "0",
+        year, ok = QInputDialog.getInt(self, "Год партии", "Год:", date.today().year, 2000, 2100)
+        if not ok:
+            return
+        values = [parts[0].strip(), parts[1].strip().casefold(), str(year), "Не передана", "0",
                   "", "", "0", "0", "", "", "0", "0", "", "", ""]
         for c, value in enumerate(values):
             self.table.setItem(row, c, QTableWidgetItem(value))
@@ -322,11 +330,12 @@ class BatchManagerDialog(QDialog):
             for r in range(self.table.rowCount()):
                 executor = self.table.item(r, 0).text().strip()
                 month = self.table.item(r, 1).text().strip().casefold()
+                year = int(self.table.item(r, 2).text())
                 if not executor or not month:
                     raise ValueError(f"Не заполнены исполнитель или месяц в строке {r + 1}.")
-                data = {"executor": executor, "month": month,
-                        "comment": self.table.item(r, 14).text().strip()}
-                for i, field in zip((4, 5, 8, 9, 12, 13), self.FIELDS):
+                data = {"executor": executor, "month": month, "year": year,
+                        "comment": self.table.item(r, 15).text().strip()}
+                for i, field in zip((5, 6, 9, 10, 13, 14), self.FIELDS):
                     data[field] = self._to_iso(self.table.item(r, i).text())
                 self.db.save_batch(data)
             QMessageBox.information(self, "Сохранено", "Данные по партиям обновлены.")
@@ -337,7 +346,6 @@ class BatchManagerDialog(QDialog):
 
 class ReportPreviewDialog(QDialog):
     SHEETS = [
-        ("2026 Реестр", "Реестр"),
         ("2026 Сводка по партиям", "Партии"),
         ("2026 Отчёт руководителю", "Отчёт руководителю"),
         ("2026 Годовой отчет", "Годовой отчёт"),
@@ -389,7 +397,7 @@ class ReportPreviewDialog(QDialog):
 class MainWindow(QMainWindow):
     scan_files_changed = Signal()
     COLUMNS = [
-        ("executor", "Исполнитель"), ("month", "Месяц"), ("protocol", "№ протокола"),
+        ("executor", "Исполнитель"), ("month", "Месяц"), ("year", "Год"), ("protocol", "№ протокола"),
         ("organization", "Организация"), ("workplaces", "Мест"),
         ("fee", "К получению, ₽"), ("share", "Моя доля, ₽"),
         ("admin", "Админ, ₽"), ("archive_index", "Индекс дела"),
@@ -432,7 +440,7 @@ class MainWindow(QMainWindow):
             ("Контроль партий", self.manage_batches),
             ("Импорт архива", self.import_archive),
             ("Загрузить отчетность", self.import_legacy),
-            ("Экспорт отчётов", self.export_reports),
+            ("Выгрузить отчёт", self.export_reports),
             ("Резервная копия", self.backup_database),
         ]
         for label, callback in actions:
@@ -444,14 +452,14 @@ class MainWindow(QMainWindow):
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Поиск"))
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Организация, протокол, исполнитель, месяц или индекс дела")
+        self.search.setPlaceholderText("Организация, протокол, исполнитель, месяц, год или индекс дела")
         self.search.textChanged.connect(self.refresh_table)
         search_row.addWidget(self.search)
         layout.addLayout(search_row)
 
         filter_grid = QGridLayout()
         self.filter_boxes = {}
-        filter_specs = (("executor", "Исполнитель"), ("month", "Месяц"),
+        filter_specs = (("year", "Год"), ("executor", "Исполнитель"), ("month", "Месяц"),
                         ("organization", "Организация"), ("protocol", "Протокол"),
                         ("archive_index", "Индекс дела"),
                         ("assembled", "Документы собраны"), ("scanned", "Отсканированы"),
@@ -476,6 +484,7 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self.edit_record)
         self.table.itemChanged.connect(self.update_status_from_table)
+        self._filter_values_cache = {}
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
@@ -529,20 +538,26 @@ class MainWindow(QMainWindow):
         if hasattr(self, "filter_boxes"):
             filter_values = {
                 key: sorted({str(r[key]) for r in rows if r.get(key)})
-                for key in ("executor", "month", "organization", "protocol", "archive_index")
+                for key in ("year", "executor", "month", "organization", "protocol", "archive_index")
             }
             for key, values in filter_values.items():
                 combo = self.filter_boxes[key]
-                selected = combo.currentText()
-                combo.blockSignals(True)
-                combo.clear()
-                combo.addItem("Все", "")
-                for value in values:
-                    combo.addItem(value, value)
-                idx = combo.findText(selected)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
-                combo.blockSignals(False)
+                selected = combo.currentData()
+                if self._filter_values_cache.get(key) != values:
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItem("Все", "")
+                    for value in values:
+                        combo.addItem(value, value)
+                    idx = combo.findData(selected)
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+                    elif key == "year":
+                        current_idx = combo.findData(str(date.today().year))
+                        if current_idx >= 0:
+                            combo.setCurrentIndex(current_idx)
+                    combo.blockSignals(False)
+                    self._filter_values_cache[key] = values
             for key in ("assembled", "scanned", "yandex"):
                 combo = self.filter_boxes[key]
                 selected = combo.currentText()
@@ -558,7 +573,7 @@ class MainWindow(QMainWindow):
             filtered = []
             for record in rows:
                 ok = True
-                for key in ("executor", "month", "organization", "protocol", "archive_index"):
+                for key in ("year", "executor", "month", "organization", "protocol", "archive_index"):
                     value = self.filter_boxes[key].currentData()
                     if value and str(record.get(key) or "") != value:
                         ok = False
@@ -585,22 +600,23 @@ class MainWindow(QMainWindow):
             total_share += share
             total_admin += admin
             values = [
-                record["id"], record["executor"], record["month"], record["protocol"],
+                record["id"], record["executor"], record["month"], record["year"], record["protocol"],
                 record["organization"], workplaces, fee, share, admin, record["archive_index"] or "",
                 record["assembled_date"], record["scanned_date"], record["yandex_uploaded_date"],
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem("")
-                if col in (10, 11, 12):
+                if col in (11, 12, 13):
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
                     item.setCheckState(Qt.CheckState.Checked if value else Qt.CheckState.Unchecked)
                     item.setData(Qt.ItemDataRole.UserRole, record["id"])
                 else:
                     item.setText(str(value if value is not None else ""))
-                if col in (0, 5, 6, 7, 8):
+                if col in (0, 6, 7, 8, 9):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row_num, col, item)
         self.table.blockSignals(False)
+        self._visible_admin_total = total_admin
         self.summary.setText(
             f"Записей: {len(rows)} · Рабочих мест: {total_workplaces} · "
             f"К получению: {total_fee:,} ₽ · Моя доля: {total_share:,} ₽ · "
@@ -608,19 +624,27 @@ class MainWindow(QMainWindow):
         )
 
     def update_status_from_table(self, item):
-        if item.column() not in (10, 11, 12):
+        if item.column() not in (11, 12, 13):
             return
         record_id = item.data(Qt.ItemDataRole.UserRole)
         if not record_id:
             return
-        record = dict(self.db.get_record(int(record_id)))
-        field = {10: "assembled_date", 11: "scanned_date", 12: "yandex_uploaded_date"}[item.column()]
-        record[field] = date.today().isoformat() if item.checkState() == Qt.CheckState.Checked else None
+        field = {11: "assembled_date", 12: "scanned_date", 13: "yandex_uploaded_date"}[item.column()]
+        stamp = date.today().isoformat() if item.checkState() == Qt.CheckState.Checked else None
         try:
-            self.db.update_record(int(record_id), record)
+            self.db.update_status(int(record_id), field, stamp)
+            row = item.row()
+            if item.column() == 12:
+                admin_item = self.table.item(row, 9)
+                if admin_item:
+                    admin_item.setText("100" if stamp else "0")
+                # Update the visible summary only; do not reload the full registry.
+                if hasattr(self, "_visible_admin_total"):
+                    self._visible_admin_total += 100 if stamp else -100
+                    self.summary.setText(self.summary.text().split(" · Админ. работа:")[0] +
+                                         f" · Админ. работа: {self._visible_admin_total:,} ₽".replace(",", " "))
         except Exception as exc:
             QMessageBox.critical(self, "Не удалось сохранить статус", str(exc))
-        self.refresh_table()
 
     def selected_record_id(self):
         row = self.table.currentRow()
