@@ -385,7 +385,7 @@ class ReportPreviewDialog(QDialog):
         layout.addWidget(note)
         buttons = QHBoxLayout()
         cancel = QPushButton("Отмена")
-        proceed = QPushButton("Продолжить экспорт")
+        proceed = QPushButton("Выгрузить отчёт")
         cancel.clicked.connect(self.reject)
         proceed.clicked.connect(self.accept)
         buttons.addStretch()
@@ -662,8 +662,14 @@ class MainWindow(QMainWindow):
         dialog = RecordDialog(self, executors=self.db.list_executors())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
-                self.db.add_record(dialog.data())
+                data = dialog.data()
+                self.db.add_record(data)
                 self.refresh_table()
+                year_combo = self.filter_boxes.get("year")
+                if year_combo:
+                    idx = year_combo.findData(str(data["year"]))
+                    if idx >= 0:
+                        year_combo.setCurrentIndex(idx)
             except ValueError as exc:
                 QMessageBox.warning(self, "Дубликат протокола", str(exc))
 
