@@ -730,15 +730,16 @@ class MainWindow(QMainWindow):
             self.db.backup_to(self.backup_path)
             if hasattr(self, "backup_path_label"):
                 self.backup_path_label.setText(f"Файл копии: {self.backup_path} · обновлено автоматически")
+            return True
         except Exception as exc:
             self.statusBar().showMessage(f"Не удалось создать резервную копию: {exc}", 10000)
+            return False
 
     def backup_database(self):
-        try:
-            self.create_auto_backup()
+        if self.create_auto_backup():
             QMessageBox.information(self, "Резервная копия", f"Резервная копия обновлена:\n{self.backup_path}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
+        else:
+            QMessageBox.critical(self, "Ошибка резервного копирования", "Не удалось создать резервную копию. Подробности — в строке состояния.")
 
     def restore_database(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -758,7 +759,10 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            self.create_auto_backup()
+            safety_path = self.backup_path.with_name(
+                f"yurkon_archive_before_restore_{datetime.now():%Y%m%d_%H%M%S}.sqlite3"
+            )
+            self.db.backup_to(safety_path)
             self.db.restore_from(path)
             self.refresh_table()
             self.refresh_scan_queue()
