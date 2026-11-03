@@ -259,7 +259,6 @@ class BatchManagerDialog(QDialog):
 
     def _load_rows(self):
         batches = [dict(row) for row in self.db.list_batches()]
-        self.table.setRowCount(len(batches))
         records = self.db.list_records()
         aggregates = {}
         for rec in records:
@@ -269,6 +268,9 @@ class BatchManagerDialog(QDialog):
             item["workplaces"] += int(rec["workplaces"] or 0)
             if rec["admin_done_date"]:
                 item["admin_count"] += 1
+        batches = [batch for batch in batches
+                   if aggregates.get((batch["executor"], batch["month"], batch["year"]), {}).get("count", 0) > 0]
+        self.table.setRowCount(len(batches))
         for r, batch in enumerate(batches):
             if batch.get("primary_paid_date") and batch.get("admin_paid_date"):
                 status = "Оплачена"
@@ -287,10 +289,13 @@ class BatchManagerDialog(QDialog):
                 batch["executor"], batch["month"], batch["year"], status, totals.get("count", 0),
                 _display_date(batch.get("primary_given_date")),
                 _display_date(batch.get("primary_returned_date")),
-                workplaces * self.rates["primary_rate"], workplaces * self.rates["primary_share_rate"],
+                sum(int(rec.get("workplaces") or 0) * int(rec.get("primary_rate") or self.rates["primary_rate"])
+                    for rec in records if rec["executor"] == batch["executor"] and rec["month"] == batch["month"] and rec["year"] == batch["year"]),
+                sum(int(rec.get("workplaces") or 0) * int(rec.get("primary_share_rate") or self.rates["primary_share_rate"])
+                    for rec in records if rec["executor"] == batch["executor"] and rec["month"] == batch["month"] and rec["year"] == batch["year"]),
                 _display_date(batch.get("primary_report_date")),
                 _display_date(batch.get("primary_paid_date")),
-                admin_count, sum((int(rec.get("admin_amount")) if rec.get("admin_amount") not in (None, "") else self.rates["admin_rate"]) for rec in records if rec["executor"] == batch["executor"] and rec["month"] == batch["month"] and rec["year"] == batch["year"] and rec.get("admin_done_date")),
+                admin_count, sum((int(rec.get("admin_amount")) if rec.get("admin_amount") not in (None, "") else int(rec.get("admin_rate") or self.rates["admin_rate"])) for rec in records if rec["executor"] == batch["executor"] and rec["month"] == batch["month"] and rec["year"] == batch["year"] and rec.get("admin_done_date")),
                 _display_date(batch.get("admin_report_date")),
                 _display_date(batch.get("admin_paid_date")),
                 batch.get("comment") or "",
@@ -858,10 +863,11 @@ class MainWindow(QMainWindow):
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
             workplaces = int(record["workplaces"] or 0)
-            fee = workplaces * rates["primary_rate"]
-            share = workplaces * rates["primary_share_rate"]
+            fee = workplaces * int(record.get("primary_rate") or rates["primary_rate"])
+            share = workplaces * int(record.get("primary_share_rate") or rates["primary_share_rate"])
             custom_admin = record.get("admin_amount")
-            admin = (int(custom_admin) if custom_admin not in (None, "") else rates["admin_rate"]) if record["admin_done_date"] else 0
+            admin_rate = int(record.get("admin_rate") or rates["admin_rate"])
+            admin = (int(custom_admin) if custom_admin not in (None, "") else admin_rate) if record["admin_done_date"] else 0
             total_workplaces += workplaces
             total_fee += fee
             total_share += share
@@ -907,7 +913,8 @@ class MainWindow(QMainWindow):
                 record = self.db.get_record(int(record_id))
                 rates = self.db.get_rates()
                 custom = record["admin_amount"] if record else None
-                new_amount = (int(custom) if custom not in (None, "") else rates["admin_rate"]) if stamp else 0
+                admin_rate = int(record["admin_rate"] or rates["admin_rate"]) if record else rates["admin_rate"]
+                new_amount = (int(custom) if custom not in (None, "") else admin_rate) if stamp else 0
                 if admin_item:
                     admin_item.setText(str(new_amount))
                 # Update the visible summary only; do not reload the full registry.
