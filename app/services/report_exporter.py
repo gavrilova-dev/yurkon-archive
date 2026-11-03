@@ -27,11 +27,16 @@ def _party(record):
     return f'{record.get("executor") or ""} - {record.get("month") or ""}'.strip(" -")
 
 
+def _record_rate(record, key, rates):
+    value = record.get(key)
+    return int(value) if value not in (None, "") else int(rates[key])
+
+
 def _admin_amount(record, rates):
     if not record.get("admin_done_date"):
         return 0
     value = record.get("admin_amount")
-    return int(value) if value not in (None, "") else int(rates["admin_rate"])
+    return int(value) if value not in (None, "") else _record_rate(record, "admin_rate", rates)
 
 
 def _set_rows(ws, title, headers, rows, total=None, start_row=3):
@@ -92,8 +97,8 @@ def _build_summary(ws, records, batches, year, rates):
             len(group),
             _date(batch.get("primary_given_date")),
             _date(batch.get("primary_returned_date")),
-            sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group),
-            sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group),
+            sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_rate", rates) for r in group),
+            sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_share_rate", rates) for r in group),
             _date(batch.get("primary_report_date")),
             _date(batch.get("primary_paid_date")),
             sum(1 for r in group if r.get("admin_done_date")),
@@ -107,7 +112,7 @@ def _build_summary(ws, records, batches, year, rates):
         sum(r[4] for r in rows), sum(r[5] for r in rows), None, None,
         sum(r[8] for r in rows), sum(r[9] for r in rows), None, None, None,
     ]
-    _set_rows(ws, f"Сводка по партиям — {year}", headers, rows, total)
+    _set_rows(ws, None, headers, rows, total, start_row=1)
 
 
 def _build_annual(ws, records, batches, year, rates):
@@ -117,8 +122,8 @@ def _build_annual(ws, records, batches, year, rates):
     month_rows = []
     for month in MONTHS:
         group = [r for r in records if str(r.get("month") or "").casefold() == month.casefold()]
-        fee = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
-        share = sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group)
+        fee = sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_rate", rates) for r in group)
+        share = sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_share_rate", rates) for r in group)
         admin = sum(_admin_amount(r, rates) for r in group)
         month_rows.append([month, len(group), sum(int(r.get("workplaces") or 0) for r in group),
                            fee, share, admin, share + admin])
@@ -132,8 +137,8 @@ def _build_annual(ws, records, batches, year, rates):
     executor_rows = []
     for executor in executors:
         group = [r for r in records if str(r.get("executor") or "") == executor]
-        fee = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
-        share = sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group)
+        fee = sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_rate", rates) for r in group)
+        share = sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_share_rate", rates) for r in group)
         admin = sum(_admin_amount(r, rates) for r in group)
         executor_rows.append([executor, len(group), sum(int(r.get("workplaces") or 0) for r in group),
                               fee, share, admin, share + admin])
@@ -146,7 +151,7 @@ def _build_annual(ws, records, batches, year, rates):
         key = (str(batch.get("executor") or "").casefold(), str(batch.get("month") or "").casefold())
         group = [r for r in records if (str(r.get("executor") or "").casefold(),
                                         str(r.get("month") or "").casefold()) == key]
-        primary_amount = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
+        primary_amount = sum(int(r.get("workplaces") or 0) * _record_rate(r, "primary_rate", rates) for r in group)
         admin_amount = sum(_admin_amount(r, rates) for r in group)
         if batch.get("primary_paid_date"):
             primary_paid += primary_amount
@@ -169,15 +174,11 @@ def _build_annual(ws, records, batches, year, rates):
 
 def _build_manager(ws, records, party, manager_kind, rates):
     group = [r for r in records if _party(r).casefold() == party.casefold()]
-    ws["A1"] = "ОТЧЁТ РУКОВОДИТЕЛЮ"
-    ws["A1"].font = Font(bold=True, size=12)
-    ws["A2"] = "Партия"
-    ws["B2"] = party
     if manager_kind == "primary":
         headers = ["№ протокола", "Название организации", "Кол-во рабочих мест",
-                   f"Сумма по ставке {rates['primary_rate']} ₽ за место"]
+                   "Сумма за рабочие места, ₽"]
         rows = [[r.get("protocol"), r.get("organization"), int(r.get("workplaces") or 0),
-                 int(r.get("workplaces") or 0) * rates["primary_rate"]]
+                 int(r.get("workplaces") or 0) * _record_rate(r, "primary_rate", rates)]
                 for r in sorted(group, key=lambda r: str(r.get("protocol") or ""))]
         total = ["ИТОГО", "", sum(row[2] for row in rows), sum(row[3] for row in rows)]
     else:
@@ -187,7 +188,7 @@ def _build_manager(ws, records, party, manager_kind, rates):
                  _admin_amount(r, rates)]
                 for r in sorted(admin_records, key=lambda r: str(r.get("protocol") or ""))]
         total = ["ИТОГО", "", len(rows), sum(row[3] for row in rows)]
-    _set_rows(ws, "Первичная документация" if manager_kind == "primary" else "Административная работа", headers, rows, total, start_row=5)
+    _set_rows(ws, None, headers, rows, total, start_row=1)
 
 
 def export_report(template_path: str | Path | None, output_path: str | Path, records, batches,
