@@ -449,7 +449,9 @@ class ReportPreviewDialog(QDialog):
             export_report(self.template_path, preview_path, self.records, self.batches,
                           year, report_type=report_type, party=party, manager_kind=kind)
             wb = load_workbook(preview_path, data_only=True, read_only=False)
-            ws = wb.active
+            sheet_suffix = {"summary": "Сводка по партиям", "manager": "Отчёт руководителю",
+                            "annual": "Годовой отчет"}[report_type]
+            ws = wb[f"{year} {sheet_suffix}"]
             visible = []
             max_col = ws.max_column
             for row_num in range(1, ws.max_row + 1):
