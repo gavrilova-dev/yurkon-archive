@@ -4,6 +4,7 @@ from copy import copy
 from pathlib import Path
 from datetime import date, datetime
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import get_column_letter
 
 MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
@@ -153,15 +154,21 @@ def _fill_yearly(ws, records, batches, year):
                 cell.font = font
 
 
+def _clear_cells(ws, min_row, max_row, min_col=1, max_col=5):
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            cell = ws.cell(row, col)
+            if not isinstance(cell, MergedCell):
+                cell.value = None
+
+
 def _fill_manager(ws, records, party, manager_kind):
     ws["B3"] = party
     chosen = _party_records(records, party)
     primary = sorted(chosen, key=lambda r: str(r.get("protocol") or ""))
     admin = [r for r in primary if r.get("admin_done_date")]
     if manager_kind == "primary":
-        for row in range(139, 274):
-            for col in range(1, 6):
-                ws.cell(row, col).value = None
+        _clear_cells(ws, 139, 273)
         ws["A5"] = "ОТЧЁТ ПО ПАРТИИ КОНТОР — ПЕРВИЧНАЯ ДОКУМЕНТАЦИЯ"
         for i, rec in enumerate(primary[:130], 7):
             vals = [rec.get("protocol"), rec.get("organization"), int(rec.get("workplaces") or 0),
@@ -174,9 +181,7 @@ def _fill_manager(ws, records, party, manager_kind):
         ws["A139"] = None
         ws["A273"] = None
     else:
-        for row in range(5, 139):
-            for col in range(1, 6):
-                ws.cell(row, col).value = None
+        _clear_cells(ws, 5, 138)
         ws["A139"] = "ОТЧЁТ ПО ПАРТИИ КОНТОР — АДМИНИСТРАТИВНАЯ РАБОТА"
         for i, rec in enumerate(admin[:130], 141):
             vals = [rec.get("protocol"), rec.get("organization"), _date(rec.get("admin_done_date")), 100]
