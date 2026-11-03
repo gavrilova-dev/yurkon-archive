@@ -17,6 +17,7 @@ class Database:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute("PRAGMA synchronous = FULL")
         self.initialize()
 
     def initialize(self) -> None:
@@ -29,6 +30,7 @@ class Database:
             protocol TEXT NOT NULL DEFAULT '',
             organization TEXT NOT NULL DEFAULT '',
             workplaces INTEGER NOT NULL DEFAULT 0,
+            admin_amount INTEGER,
             admin_done_date TEXT,
             assembled_date TEXT,
             returned_date TEXT,
@@ -78,6 +80,8 @@ class Database:
         );
         """)
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(primary_records)")}
+        if "admin_amount" not in columns:
+            self.connection.execute("ALTER TABLE primary_records ADD COLUMN admin_amount INTEGER")
         if "yandex_uploaded_date" not in columns:
             self.connection.execute("ALTER TABLE primary_records ADD COLUMN yandex_uploaded_date TEXT")
         if "year" not in columns:
@@ -110,6 +114,9 @@ class Database:
             """)
             self.connection.execute("DROP TABLE batches_old")
         self.connection.execute("CREATE INDEX IF NOT EXISTS idx_primary_year ON primary_records(year)")
+        defaults = {"primary_rate": "20", "primary_share_rate": "10", "admin_rate": "100"}
+        for key, value in defaults.items():
+            self.connection.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
         self.connection.execute("CREATE INDEX IF NOT EXISTS idx_archive_protocol_norm ON archive_records(protocol_norm)")
         self.connection.commit()
 
@@ -154,6 +161,35 @@ class Database:
         )
         self.connection.commit()
 
+    def get_rates(self) -> dict[str, int]:
+        return {
+            "primary_rate": int(self.get_setting("primary_rate", "20")),
+            "primary_share_rate": int(self.get_setting("primary_share_rate", "10")),
+            "admin_rate": int(self.get_setting("admin_rate", "100")),
+        }
+
+    def save_rates(self, rates: dict[str, int]) -> None:
+        for key in ("primary_rate", "primary_share_rate", "admin_rate"):
+            value = int(rates[key])
+            if value < 0:
+                raise ValueError("Суммы не могут быть отрицательными.")
+            self.set_setting(key, str(value))
+
+    def restore_from(self, path: str | Path) -> None:
+        source_path = Path(path).resolve()
+        if source_path == self.path.resolve():
+            raise ValueError("Нельзя восстановить базу из текущего файла базы.")
+        if not source_path.exists():
+            raise FileNotFoundError(source_path)
+        source = sqlite3.connect(source_path)
+        try:
+            source.backup(self.connection)
+            self.connection.commit()
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            self.connection.execute("PRAGMA synchronous = FULL")
+        finally:
+            source.close()
+
     def find_duplicate_protocol(self, protocol: str, exclude_id: int | None = None):
         normalized = self._norm(protocol).replace(" ", "").replace("ё", "е")
         if not normalized:
@@ -178,7 +214,7 @@ class Database:
                 f'партия: {duplicate["month"]}). Проверьте запись перед добавлением.'
             )
         fields = (
-            "executor", "month", "year", "protocol", "organization", "workplaces",
+            "executor", "month", "year", "protocol", "organization", "workplaces", "admin_amount",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
@@ -186,7 +222,8 @@ class Database:
         values[2] = int(values[2] or date.today().year)
         values[6:12] = [self._date(v) for v in values[6:12]]
         values[5] = int(values[5] or 0)
-        values[13] = values[13] or ""
+        values[6] = int(values[6]) if values[6] not in (None, "") else None
+        values[14] = values[14] or ""
         cur = self.connection.execute(
             f"INSERT INTO primary_records({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
             values,
@@ -216,7 +253,8 @@ class Database:
         values[2] = int(values[2] or date.today().year)
         values[6:12] = [self._date(v) for v in values[6:12]]
         values[5] = int(values[5] or 0)
-        values[13] = values[13] or ""
+        values[6] = int(values[6]) if values[6] not in (None, "") else None
+        values[14] = values[14] or ""
         assignments = ",".join(f"{k}=?" for k in fields)
         self.connection.execute(
             f"UPDATE primary_records SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE id=?",
