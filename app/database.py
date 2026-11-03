@@ -187,6 +187,7 @@ class Database:
             self.connection.commit()
             self.connection.execute("PRAGMA foreign_keys = ON")
             self.connection.execute("PRAGMA synchronous = FULL")
+            self.initialize()
         finally:
             source.close()
 
@@ -220,9 +221,9 @@ class Database:
         )
         values = [data.get(k) for k in fields]
         values[2] = int(values[2] or date.today().year)
-        values[6:12] = [self._date(v) for v in values[6:12]]
         values[5] = int(values[5] or 0)
         values[6] = int(values[6]) if values[6] not in (None, "") else None
+        values[7:13] = [self._date(v) for v in values[7:13]]
         values[14] = values[14] or ""
         cur = self.connection.execute(
             f"INSERT INTO primary_records({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
@@ -245,15 +246,15 @@ class Database:
                     f'партия: {duplicate["month"]}).'
                 )
         fields = (
-            "executor", "month", "year", "protocol", "organization", "workplaces",
+            "executor", "month", "year", "protocol", "organization", "workplaces", "admin_amount",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
         )
         values = [data.get(k, current[k] if current else None) for k in fields]
         values[2] = int(values[2] or date.today().year)
-        values[6:12] = [self._date(v) for v in values[6:12]]
         values[5] = int(values[5] or 0)
         values[6] = int(values[6]) if values[6] not in (None, "") else None
+        values[7:13] = [self._date(v) for v in values[7:13]]
         values[14] = values[14] or ""
         assignments = ",".join(f"{k}=?" for k in fields)
         self.connection.execute(
