@@ -79,6 +79,24 @@ class ReportExporterTests(unittest.TestCase):
             self.assertEqual(ws["D2"].value, 105)
             self.assertEqual(ws["D3"].value, 105)
 
+
+    def test_record_snapshots_override_current_settings_in_reports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "snapshot.xlsx"
+            records = [{
+                "year": 2026, "executor": "Старый", "month": "январь",
+                "protocol": "1/2026", "organization": "ООО Старое", "workplaces": 5,
+                "primary_rate": 20, "primary_share_rate": 10, "admin_rate": 100,
+                "admin_done_date": "2026-01-10",
+            }]
+            export_report(None, output, records, [], 2026, report_type="summary",
+                          rates={"primary_rate": 30, "primary_share_rate": 15, "admin_rate": 150})
+            ws = load_workbook(output, data_only=True).active
+            self.assertEqual(ws["E2"].value, 100)
+            self.assertEqual(ws["F2"].value, 50)
+            self.assertEqual(ws["J2"].value, 100)
+            ws.parent.close()
+
     def test_annual_report_has_three_separate_tables_and_bold_headers(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "annual.xlsx"
