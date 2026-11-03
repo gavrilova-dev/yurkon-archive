@@ -1118,10 +1118,22 @@ class MainWindow(QMainWindow):
             return
         try:
             destination = self.file_manager.move_pdf(self.current_pdf, rec["archive_index"])
-            self.db.mark_scanned(
+            marked = self.db.mark_scanned(
                 rec["protocol"], rec["organization"], str(destination), date.today().isoformat()
             )
-            QMessageBox.information(self, "Готово", f"Файл сохранён:\n{destination}")
+            if marked:
+                QMessageBox.information(
+                    self, "Готово",
+                    f"Файл сохранён:\n{destination}\n\nОтметка «Отсканировано» проставлена."
+                )
+            else:
+                QMessageBox.warning(
+                    self, "Файл сохранён, но запись не найдена",
+                    f"PDF перемещён в папку готовых сканов:\n{destination}\n\n"
+                    "Но в основной таблице не найдена запись с таким номером протокола "
+                    "и названием организации. Автоматическая отметка «Отсканировано» "
+                    "не проставлена. Найдите нужную строку в таблице и отметьте её вручную."
+                )
             self.current_pdf = None
             self.current_archive_record = None
             self.archive_detail.setText("Файл обработан. Выберите следующий PDF.")
