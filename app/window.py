@@ -345,54 +345,163 @@ class BatchManagerDialog(QDialog):
 
 
 class ReportPreviewDialog(QDialog):
-    SHEET_TITLES = [
-        ("Сводка по партиям", "Партии"),
-        ("Отчёт руководителю", "Отчёт руководителю"),
-        ("Годовой отчет", "Годовой отчёт"),
+    REPORTS = [
+        ("summary", "Сводка по партиям"),
+        ("manager", "Отчёт руководителю"),
+        ("annual", "Годовой отчет"),
     ]
 
-    def __init__(self, parent, workbook_path, year=2026):
+    def __init__(self, parent, template_path, records, batches, years, default_year):
         super().__init__(parent)
-        self.setWindowTitle("Предпросмотр отчётности")
-        self.resize(1350, 760)
+        self.setWindowTitle("Отчётность")
+        self.resize(1450, 850)
+        self.template_path = str(template_path)
+        self.records = [dict(r) for r in records]
+        self.batches = [dict(b) for b in batches]
+        self.years = [str(y) for y in years]
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.pages = {}
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        wb = load_workbook(workbook_path, data_only=False, read_only=True)
-        for suffix, title in self.SHEET_TITLES:
-            sheet_name = f"{year} {suffix}"
-            if sheet_name not in wb.sheetnames:
-                continue
-            ws = wb[sheet_name]
+        layout.addWidget(self.tabs)
+
+        for report_type, title in self.REPORTS:
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            controls = QHBoxLayout()
+            controls.addWidget(QLabel("Год:"))
+            year_box = QComboBox()
+            year_box.addItems(self.years)
+            year_box.setCurrentText(str(default_year))
+            controls.addWidget(year_box)
+            party_box = None
+            kind_box = None
+            if report_type == "manager":
+                controls.addSpacing(12)
+                controls.addWidget(QLabel("Партия:"))
+                party_box = QComboBox()
+                party_box.setMinimumWidth(220)
+                controls.addWidget(party_box)
+                controls.addSpacing(12)
+                controls.addWidget(QLabel("Вид отчёта:"))
+                kind_box = QComboBox()
+                kind_box.addItem("Первичка", "primary")
+                kind_box.addItem("Административная работа", "admin")
+                controls.addWidget(kind_box)
+            controls.addStretch()
+            export_button = QPushButton("Выгрузить этот отчёт")
+            controls.addWidget(export_button)
+            page_layout.addLayout(controls)
             table = QTableWidget()
-            max_rows = min(ws.max_row, 250)
-            max_cols = min(ws.max_column, 20)
-            table.setRowCount(max_rows)
-            table.setColumnCount(max_cols)
-            table.setHorizontalHeaderLabels([
-                str(ws.cell(1, c).value or f"Столбец {c}") for c in range(1, max_cols + 1)
-            ])
-            for r in range(1, max_rows + 1):
-                for c in range(1, max_cols + 1):
-                    value = ws.cell(r, c).value
-                    if value is not None:
-                        table.setItem(r - 1, c - 1, QTableWidgetItem(str(value)))
             table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             table.setAlternatingRowColors(True)
+            table.setWordWrap(True)
+            table.verticalHeader().setDefaultSectionSize(25)
             table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-            self.tabs.addTab(table, title)
-        wb.close()
-        layout.addWidget(self.tabs)
-        note = QLabel("Показаны первые 250 строк каждого листа. Итоговый Excel сохранит все строки и листы шаблона.")
-        layout.addWidget(note)
-        buttons = QHBoxLayout()
-        cancel = QPushButton("Отмена")
-        proceed = QPushButton("Выгрузить отчёт")
-        cancel.clicked.connect(self.reject)
-        proceed.clicked.connect(self.accept)
-        buttons.addStretch()
-        buttons.addWidget(cancel)
-        buttons.addWidget(proceed)
-        layout.addLayout(buttons)
+            page_layout.addWidget(table)
+            self.pages[report_type] = {
+                "year": year_box, "party": party_box, "kind": kind_box,
+                "table": table, "export": export_button,
+            }
+            year_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
+            if party_box:
+                party_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
+                kind_box.currentIndexChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
+            export_button.clicked.connect(lambda _=False, t=report_type: self.export_page(t))
+            self.tabs.addTab(page, title)
+        self.refresh_page("summary")
+        self.tabs.setCurrentIndex(0)
+
+    def _parties(self, year):
+        return sorted({
+            f'{r.get("executor") or ""} - {r.get("month") or ""}'.strip(" -")
+            for r in self.records if int(r.get("year") or year) == int(year)
+            and (r.get("executor") or r.get("month"))
+        }, key=str.casefold)
+
+    def _settings(self, report_type):
+        page = self.pages[report_type]
+        year = int(page["year"].currentText())
+        party = page["party"].currentText() if page["party"] else ""
+        kind = page["kind"].currentData() if page["kind"] else "primary"
+        return year, party, kind
+
+    def refresh_page(self, report_type):
+        page = self.pages[report_type]
+        year = int(page["year"].currentText())
+        if page["party"]:
+            current = page["party"].currentText()
+            parties = self._parties(year)
+            page["party"].blockSignals(True)
+            page["party"].clear()
+            page["party"].addItems(parties)
+            if current in parties:
+                page["party"].setCurrentText(current)
+            page["party"].blockSignals(False)
+        year, party, kind = self._settings(report_type)
+        if report_type == "manager" and not party:
+            parties = self._parties(year)
+            party = parties[0] if parties else ""
+            if page["party"] and party:
+                page["party"].setCurrentText(party)
+        preview_path = Path(self.temp_dir.name) / f"preview_{report_type}_{year}_{kind}.xlsx"
+        try:
+            export_report(self.template_path, preview_path, self.records, self.batches,
+                          year, report_type=report_type, party=party, manager_kind=kind)
+            wb = load_workbook(preview_path, data_only=True, read_only=False)
+            ws = wb.active
+            visible = []
+            max_col = ws.max_column
+            for row_num in range(1, ws.max_row + 1):
+                values = [ws.cell(row_num, col).value for col in range(1, max_col + 1)]
+                if any(value not in (None, "") for value in values):
+                    visible.append((row_num, values))
+            table = page["table"]
+            table.clear()
+            table.setRowCount(len(visible))
+            table.setColumnCount(max_col)
+            table.setHorizontalHeaderLabels([chr(64+c) if c <= 26 else str(c) for c in range(1,max_col+1)])
+            table.setVerticalHeaderLabels([str(row_num) for row_num, _ in visible])
+            for ri, (source_row, values) in enumerate(visible):
+                for ci, value in enumerate(values):
+                    if value is None:
+                        continue
+                    text = value.strftime("%d.%m.%Y") if isinstance(value, (datetime, date)) else str(value)
+                    item = QTableWidgetItem(text)
+                    if ws.cell(source_row, ci + 1).font.bold:
+                        font = item.font()
+                        font.setBold(True)
+                        item.setFont(font)
+                    table.setItem(ri, ci, item)
+            table.resizeColumnsToContents()
+            wb.close()
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка предпросмотра", str(exc))
+
+    def export_page(self, report_type):
+        year, party, kind = self._settings(report_type)
+        suffix = {
+            "summary": "Сводка_по_партиям",
+            "annual": "Годовой_отчет",
+            "manager": "Отчет_руководителю_" + ("Первичка" if kind == "primary" else "Административная_работа"),
+        }[report_type]
+        default = str(Path(self.template_path).with_name(
+            f"{suffix}_{year}_{date.today():%Y-%m-%d}.xlsx"))
+        output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default, "Excel (*.xlsx)")
+        if not output:
+            return
+        if not output.lower().endswith(".xlsx"):
+            output += ".xlsx"
+        try:
+            export_report(self.template_path, output, self.records, self.batches,
+                          year, report_type=report_type, party=party, manager_kind=kind)
+            QMessageBox.information(self, "Экспорт готов", f"Отчёт сохранён:\n{output}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка экспорта", str(exc))
+
+    def closeEvent(self, event):
+        self.temp_dir.cleanup()
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -764,45 +873,22 @@ class MainWindow(QMainWindow):
         template = self.db.get_setting("report_template")
         if not template or not Path(template).exists():
             template, _ = QFileDialog.getOpenFileName(
-                self, "Выберите исходный шаблон 2026_учет_контор.xlsx",
+                self, "Выберите исходный файл 2026_учет_контор.xlsx",
                 str(APP_DATA), "Excel (*.xlsx *.xlsm)"
             )
             if not template:
                 return
             self.db.set_setting("report_template", template)
-        available_years = sorted({str(r["year"]) for r in self.db.list_records()}, reverse=True)
-        if not available_years:
+        records = [dict(r) for r in self.db.list_records()]
+        if not records:
             QMessageBox.information(self, "Нет данных", "Сначала добавьте или загрузите организации.")
             return
+        years = sorted({int(r.get("year") or date.today().year) for r in records}, reverse=True)
         current_filter = self.filter_boxes["year"].currentData()
-        default_year = current_filter if current_filter in available_years else available_years[0]
-        year, ok = QInputDialog.getItem(self, "Выгрузить отчёт", "За какой год подготовить отчёт?", available_years,
-                                        available_years.index(default_year), False)
-        if not ok:
-            return
-        default_name = str(Path(template).with_name(f"Отчёт_YURKON_{year}_{date.today():%Y-%m-%d}.xlsx"))
-        try:
-            records = sorted((dict(r) for r in self.db.list_records() if str(r["year"]) == year),
-                             key=lambda item: item["id"])
-            batches = [dict(b) for b in self.db.list_batches() if str(b["year"]) == year]
-            with tempfile.TemporaryDirectory() as temp_dir:
-                preview_path = Path(temp_dir) / "preview.xlsx"
-                export_report(template, preview_path, records, batches, int(year))
-                preview = ReportPreviewDialog(self, preview_path, int(year))
-                if preview.exec() != QDialog.DialogCode.Accepted:
-                    return
-            output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default_name, "Excel (*.xlsx)")
-            if not output:
-                return
-            if not output.lower().endswith(".xlsx"):
-                output += ".xlsx"
-            export_report(template, output, records, batches, int(year))
-            QMessageBox.information(
-                self, "Экспорт готов",
-                f"Файл создан:\n{output}\n\nГод отчётности: {year}. Все исходные листы шаблона сохранены."
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Ошибка экспорта", str(exc))
+        default_year = int(current_filter) if current_filter and str(current_filter).isdigit() and int(current_filter) in years else years[0]
+        batches = [dict(b) for b in self.db.list_batches()]
+        preview = ReportPreviewDialog(self, template, records, batches, years, default_year)
+        preview.exec()
 
     def backup_database(self):
         default = str(APP_DATA / f"yurkon_archive_backup_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
