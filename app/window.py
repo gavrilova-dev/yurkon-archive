@@ -234,7 +234,7 @@ class BatchManagerDialog(QDialog):
         self.setWindowTitle("Контроль партий")
         self.resize(1450, 650)
         layout = QVBoxLayout(self)
-        hint = QLabel("Даты вводите в формате ДД.ММ.ГГГГ. Изменения сохраняются одной кнопкой.")
+        hint = QLabel("Даты вводите в формате ДД.ММ.ГГГГ. Даты и комментарии сохраняются автоматически после изменения ячейки.")
         layout.addWidget(hint)
         self.table = QTableWidget(0, len(self.HEADERS))
         self.table.setHorizontalHeaderLabels(self.HEADERS)
@@ -297,7 +297,7 @@ class BatchManagerDialog(QDialog):
             ]
             for c, value in enumerate(values):
                 item = QTableWidgetItem(str(value if value is not None else ""))
-                if c in (3, 4, 7, 8, 11, 12):
+                if c in (0, 1, 2, 3, 4, 7, 8, 11, 12):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, c, item)
 
@@ -854,10 +854,10 @@ class MainWindow(QMainWindow):
 
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
+        rates = self.db.get_rates()
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
             workplaces = int(record["workplaces"] or 0)
-            rates = self.db.get_rates()
             fee = workplaces * rates["primary_rate"]
             share = workplaces * rates["primary_share_rate"]
             custom_admin = record.get("admin_amount")
