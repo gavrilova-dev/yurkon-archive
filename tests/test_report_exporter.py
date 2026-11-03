@@ -27,15 +27,16 @@ class ReportExporterTests(unittest.TestCase):
             wb = load_workbook(output, data_only=False)
             self.assertEqual(wb.sheetnames, ["2026 Сводка по партиям"])
             ws = wb.active
-            self.assertEqual(ws["A4"].value, "Тест - сентябрь")
-            self.assertEqual(ws["B4"].value, 1)
-            self.assertEqual(ws["E4"].value, 100)
-            self.assertEqual(ws["F4"].value, 50)
-            self.assertEqual(ws["I4"].value, 1)
-            self.assertEqual(ws["J4"].value, 100)
-            self.assertEqual(ws["A5"].value, "ИТОГО ЗА ГОД")
+            self.assertEqual(ws["A1"].value, "Партия")
+            self.assertEqual(ws["A2"].value, "Тест - сентябрь")
+            self.assertEqual(ws["B2"].value, 1)
+            self.assertEqual(ws["E2"].value, 100)
+            self.assertEqual(ws["F2"].value, 50)
+            self.assertEqual(ws["I2"].value, 1)
+            self.assertEqual(ws["J2"].value, 100)
+            self.assertEqual(ws["A3"].value, "ИТОГО ЗА ГОД")
+            self.assertTrue(ws["A1"].font.bold)
             self.assertTrue(ws["A3"].font.bold)
-            self.assertTrue(ws["A5"].font.bold)
             for sheet in wb.worksheets:
                 for row in sheet.iter_rows():
                     for cell in row:
@@ -57,11 +58,12 @@ class ReportExporterTests(unittest.TestCase):
             wb = load_workbook(output, data_only=False)
             self.assertEqual(wb.sheetnames, ["2027 Отчёт руководителю"])
             ws = wb.active
-            self.assertEqual(ws["A6"].value, "1/2027")
-            self.assertEqual(ws["D6"].value, 350)
-            self.assertEqual(ws["D7"].value, 350)
-            self.assertTrue(ws["A5"].font.bold)
-            self.assertTrue(ws["A7"].font.bold)
+            self.assertEqual(ws["A1"].value, "№ протокола")
+            self.assertEqual(ws["A2"].value, "1/2027")
+            self.assertEqual(ws["D2"].value, 350)
+            self.assertEqual(ws["D3"].value, 350)
+            self.assertTrue(ws["A1"].font.bold)
+            self.assertTrue(ws["A3"].font.bold)
             self.assertFalse(any(cell.data_type == "f" for row in ws.iter_rows() for cell in row))
             wb.close()
 
@@ -74,8 +76,8 @@ class ReportExporterTests(unittest.TestCase):
             export_report(None, output, records, [], 2027, report_type="manager",
                           party="Лилия - январь", manager_kind="primary", rates=rates)
             ws = load_workbook(output, data_only=True).active
-            self.assertEqual(ws["D6"].value, 105)
-            self.assertEqual(ws["D7"].value, 105)
+            self.assertEqual(ws["D2"].value, 105)
+            self.assertEqual(ws["D3"].value, 105)
 
     def test_annual_report_has_three_separate_tables_and_bold_headers(self):
         with tempfile.TemporaryDirectory() as folder:
