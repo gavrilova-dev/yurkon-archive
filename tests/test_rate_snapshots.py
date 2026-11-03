@@ -20,6 +20,35 @@ class RateSnapshotTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_missing_snapshot_values_are_backfilled_from_existing_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "archive.sqlite3"
+            db = Database(path)
+            rid = db.add_record({"executor":"Старый","month":"апрель","year":2026,
+                "protocol":"3/2026","organization":"ООО Архив","workplaces":2})
+            with db.connection:
+                db.connection.execute(
+                    "UPDATE primary_records SET primary_rate=NULL, primary_share_rate=NULL, admin_rate=NULL WHERE id=?",
+                    (rid,),
+                )
+                db.connection.execute(
+                    "UPDATE settings SET value='27' WHERE key='primary_rate'"
+                )
+                db.connection.execute(
+                    "UPDATE settings SET value='13' WHERE key='primary_share_rate'"
+                )
+                db.connection.execute(
+                    "UPDATE settings SET value='125' WHERE key='admin_rate'"
+                )
+            db.close()
+            migrated = Database(path)
+            try:
+                record = dict(migrated.get_record(rid))
+                self.assertEqual((record["primary_rate"],record["primary_share_rate"],record["admin_rate"]),
+                                 (27,13,125))
+            finally:
+                migrated.close()
+
     def test_custom_admin_amount_remains_override(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "archive.sqlite3")
