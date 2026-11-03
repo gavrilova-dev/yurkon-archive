@@ -130,6 +130,36 @@ class DatabaseTests(unittest.TestCase):
             self.assertIsNone(record["assembled_date"])
             self.assertIsNone(record["scanned_date"])
 
+
+    def test_custom_admin_amount_and_configurable_rates_are_saved(self):
+        self.db.save_rates({"primary_rate": 30, "primary_share_rate": 15, "admin_rate": 125})
+        record_id = self.db.add_record({
+            "executor": "Тест", "month": "сентябрь", "year": 2027,
+            "protocol": "77/2027", "organization": "ООО Большая", "workplaces": 4,
+            "admin_amount": 350, "admin_done_date": "2027-09-01"
+        })
+        record = self.db.get_record(record_id)
+        self.assertEqual(record["admin_amount"], 350)
+        self.assertEqual(self.db.get_rates(), {
+            "primary_rate": 30, "primary_share_rate": 15, "admin_rate": 125
+        })
+
+    def test_backup_restore_replaces_database_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backup = Path(folder) / "backup.sqlite3"
+            self.db.add_record({
+                "executor": "Аня", "month": "октябрь", "year": 2026,
+                "protocol": "1/2026", "organization": "ООО Старое", "workplaces": 1
+            })
+            self.db.backup_to(backup)
+            self.db.add_record({
+                "executor": "Аня", "month": "ноябрь", "year": 2026,
+                "protocol": "2/2026", "organization": "ООО Новое", "workplaces": 2
+            })
+            self.db.restore_from(backup)
+            self.assertEqual(len(self.db.list_records()), 1)
+            self.assertEqual(self.db.list_records()[0]["organization"], "ООО Старое")
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
