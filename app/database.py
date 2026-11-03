@@ -321,7 +321,7 @@ class Database:
             ]
         return records
 
-    def mark_scanned(self, protocol: str, organization: str, pdf_path: str, scanned_date: str) -> None:
+    def mark_scanned(self, protocol: str, organization: str, pdf_path: str, scanned_date: str) -> bool:
         protocol_norm = self._norm(protocol).replace(" ", "")
         organization_norm = self._norm(organization)
         matches = self.connection.execute(
@@ -333,12 +333,15 @@ class Database:
              and self._norm(row["organization"]) == organization_norm),
             None,
         )
-        if record_id is not None:
-            self.connection.execute(
-                "UPDATE primary_records SET scanned_date=?,admin_done_date=COALESCE(admin_done_date,?),pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (self._date(scanned_date), self._date(scanned_date), pdf_path, record_id),
-            )
-            self.connection.commit()
+        if record_id is None:
+            return False
+
+        self.connection.execute(
+            "UPDATE primary_records SET scanned_date=?,admin_done_date=COALESCE(admin_done_date,?),pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (self._date(scanned_date), self._date(scanned_date), pdf_path, record_id),
+        )
+        self.connection.commit()
+        return True
 
     def list_executors(self) -> list[str]:
         return [r[0] for r in self.connection.execute(
