@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
-    QGroupBox, QHeaderView, QAbstractItemView, QIntValidator,
+    QGroupBox, QHeaderView, QAbstractItemView,
 )
 
 from app.config import APP_DATA, DATABASE_PATH, INCOMING_FOLDER, READY_FOLDER, ARCHIVE_JOURNAL_DEFAULT
