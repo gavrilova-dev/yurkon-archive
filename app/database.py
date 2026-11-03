@@ -390,7 +390,7 @@ class Database:
         import re
 
         wb = load_workbook(path, data_only=True, read_only=True)
-        registry_name = next((name for name in wb.sheetnames if re.fullmatch(r"\\d{4} Реестр", name)), None)
+        registry_name = next((name for name in wb.sheetnames if name.endswith(" Реестр") and name.split()[0].isdigit()), None)
         if not registry_name:
             wb.close()
             raise ValueError("В книге не найден лист вида «2026 Реестр».")
