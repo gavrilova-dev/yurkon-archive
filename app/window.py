@@ -243,6 +243,7 @@ class BatchManagerDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(15, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table)
         self._load_rows()
+        self.table.itemChanged.connect(self._autosave_row)
         buttons = QHBoxLayout()
         add = QPushButton("Добавить партию")
         save = QPushButton("Сохранить изменения")
@@ -300,6 +301,27 @@ class BatchManagerDialog(QDialog):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, c, item)
 
+    def _save_row(self, r):
+        executor = self.table.item(r, 0).text().strip()
+        month = self.table.item(r, 1).text().strip().casefold()
+        year = int(self.table.item(r, 2).text())
+        if not executor or not month:
+            raise ValueError("Не заполнены исполнитель или месяц.")
+        data = {"executor": executor, "month": month, "year": year,
+                "comment": self.table.item(r, 15).text().strip()}
+        for i, field in zip((5, 6, 9, 10, 13, 14), self.FIELDS):
+            data[field] = self._to_iso(self.table.item(r, i).text())
+        self.db.save_batch(data)
+
+    def _autosave_row(self, item):
+        if item.column() not in (5, 6, 9, 10, 13, 14, 15):
+            return
+        try:
+            self._save_row(item.row())
+        except (ValueError, TypeError):
+            # A date may be temporarily incomplete while the user is editing it.
+            return
+
     def add_batch(self):
         value, ok = QInputDialog.getText(
             self, "Новая партия", "Введите исполнителя и месяц через дефис (например: Лилия - февраль):"
@@ -317,8 +339,11 @@ class BatchManagerDialog(QDialog):
         self.table.insertRow(row)
         values = [parts[0].strip(), parts[1].strip().casefold(), str(year), "Не передана", "0",
                   "", "", "0", "0", "", "", "0", "0", "", "", ""]
+        self.table.blockSignals(True)
         for c, value in enumerate(values):
             self.table.setItem(row, c, QTableWidgetItem(value))
+        self.table.blockSignals(False)
+        self._save_row(row)
 
     @staticmethod
     def _to_iso(value):
@@ -335,16 +360,10 @@ class BatchManagerDialog(QDialog):
     def save(self):
         try:
             for r in range(self.table.rowCount()):
-                executor = self.table.item(r, 0).text().strip()
-                month = self.table.item(r, 1).text().strip().casefold()
-                year = int(self.table.item(r, 2).text())
-                if not executor or not month:
-                    raise ValueError(f"Не заполнены исполнитель или месяц в строке {r + 1}.")
-                data = {"executor": executor, "month": month, "year": year,
-                        "comment": self.table.item(r, 15).text().strip()}
-                for i, field in zip((5, 6, 9, 10, 13, 14), self.FIELDS):
-                    data[field] = self._to_iso(self.table.item(r, i).text())
-                self.db.save_batch(data)
+                try:
+                    self._save_row(r)
+                except ValueError as exc:
+                    raise ValueError(f"Строка {r + 1}: {exc}") from exc
             QMessageBox.information(self, "Сохранено", "Данные по партиям обновлены.")
             self.accept()
         except Exception as exc:
