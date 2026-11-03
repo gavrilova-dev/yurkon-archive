@@ -124,7 +124,7 @@ def _fill_yearly(ws, records, batches, year):
         vals.append(vals[4] + vals[5])
         for c, value in enumerate(vals, 1):
             ws.cell(row, c).value = value
-    for row in range(21 + len(executors), max(ws.max_row, 23) + 1):
+    for row in range(21 + len(executors), 23):
         for c in range(1, 8):
             ws.cell(row, c).value = None
     if "ГодПоИсполнителям" in ws.tables:
