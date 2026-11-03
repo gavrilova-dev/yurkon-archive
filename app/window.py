@@ -844,15 +844,15 @@ class MainWindow(QMainWindow):
 
     def import_legacy(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите старую книгу учёта", str(APP_DATA), "Excel (*.xlsx *.xlsm)"
+            self, "Выберите книгу учёта", str(APP_DATA), "Excel (*.xlsx *.xlsm)"
         )
         if not path:
             return
         answer = QMessageBox.question(
             self, "Загрузка отчетности",
-            "Будут загружены записи из листа «2026 Реестр» и данные по партиям. "
-            "Повторные записи не добавляются. Если в отчётности указано 100 ₽ за админ. работу, "
-            "будут отмечены статусы «Документы собраны» и «Отсканированы». Продолжить?"
+            "Будут загружены только название организации, количество рабочих мест, "
+            "номер протокола, исполнитель и месяц. Суммы, статусы и контроль партий "
+            "программа рассчитает самостоятельно. Повторные протоколы будут пропущены. Продолжить?"
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -863,11 +863,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "Загрузка завершена",
                 f'Добавлено записей: {result["imported"]}\n'
-                f'Отмечено «Документы собраны» и «Отсканированы»: {result["statuses_updated"]}\n'
-                f'Повторная загрузка той же книги не создаст дубликаты.'
+                f'Пропущено повторных протоколов: {result.get("skipped", 0)}\n'
+                "Все суммы, статусы и контроль партий рассчитываются в программе."
             )
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка переноса", str(exc))
+            QMessageBox.critical(self, "Ошибка импорта", str(exc))
 
     def export_reports(self):
         template = self.db.get_setting("report_template")
