@@ -531,21 +531,28 @@ class MainWindow(QMainWindow):
         self.file_manager = FileManager(INCOMING_FOLDER, READY_FOLDER)
         self.current_pdf = None
         self.current_archive_record = None
+        self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
         self.refresh_scan_queue()
         self.scan_files_changed.connect(self.refresh_scan_queue)
         self.watcher = FileWatcher(INCOMING_FOLDER, self.scan_files_changed.emit)
         self.watcher.start()
+        self._backup_timer = QTimer(self)
+        self._backup_timer.setInterval(120000)
+        self._backup_timer.timeout.connect(self.create_auto_backup)
+        self._backup_timer.start()
         self.statusBar().showMessage(
             f"База: {DATABASE_PATH} · Записей архива: {self.db.archive_count()}"
         )
 
     def _build_ui(self):
         tabs = QTabWidget()
+        self.tabs = tabs
         self.setCentralWidget(tabs)
         tabs.addTab(self._build_registry_tab(), "Учёт организаций")
         tabs.addTab(self._build_scanner_tab(), "Обработка сканов")
+        tabs.addTab(self._build_settings_tab(), "Настройки")
 
     def _build_registry_tab(self):
         page = QWidget()
@@ -559,7 +566,6 @@ class MainWindow(QMainWindow):
             ("Импорт архива", self.import_archive),
             ("Загрузить отчетность", self.import_legacy),
             ("Выгрузить отчёт", self.export_reports),
-            ("Резервная копия", self.backup_database),
         ]
         for label, callback in actions:
             button = QPushButton(label)
@@ -657,6 +663,112 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.rename_button)
         layout.addWidget(search_group)
         return page
+
+    def _build_settings_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        rates_group = QGroupBox("Суммы для расчёта отчётности")
+        form = QFormLayout(rates_group)
+        rates = self.db.get_rates()
+        self.primary_rate_input = QSpinBox()
+        self.primary_rate_input.setRange(0, 1000000)
+        self.primary_rate_input.setValue(rates["primary_rate"])
+        self.primary_share_input = QSpinBox()
+        self.primary_share_input.setRange(0, 1000000)
+        self.primary_share_input.setValue(rates["primary_share_rate"])
+        self.admin_rate_input = QSpinBox()
+        self.admin_rate_input.setRange(0, 1000000)
+        self.admin_rate_input.setValue(rates["admin_rate"])
+        form.addRow("Оплата за 1 рабочее место, ₽", self.primary_rate_input)
+        form.addRow("Моя доля за 1 рабочее место, ₽", self.primary_share_input)
+        form.addRow("Административная работа по умолчанию, ₽", self.admin_rate_input)
+        save_rates = QPushButton("Сохранить суммы")
+        save_rates.clicked.connect(self.save_rates)
+        form.addRow(save_rates)
+        layout.addWidget(rates_group)
+
+        backup_group = QGroupBox("Резервное копирование")
+        backup_layout = QVBoxLayout(backup_group)
+        backup_info = QLabel(
+            "Программа автоматически обновляет одну резервную копию раз в 2 минуты "
+            "и при каждом штатном закрытии. Все сохранённые изменения также сразу "
+            "записываются в основную базу данных."
+        )
+        backup_info.setWordWrap(True)
+        backup_layout.addWidget(backup_info)
+        self.backup_path_label = QLabel(f"Файл копии: {self.backup_path}")
+        self.backup_path_label.setWordWrap(True)
+        backup_layout.addWidget(self.backup_path_label)
+        buttons = QHBoxLayout()
+        create_backup = QPushButton("Создать копию сейчас")
+        create_backup.clicked.connect(self.backup_database)
+        restore_backup = QPushButton("Восстановить из копии")
+        restore_backup.clicked.connect(self.restore_database)
+        buttons.addWidget(create_backup)
+        buttons.addWidget(restore_backup)
+        buttons.addStretch()
+        backup_layout.addLayout(buttons)
+        layout.addWidget(backup_group)
+        layout.addStretch()
+        return page
+
+    def save_rates(self):
+        try:
+            self.db.save_rates({
+                "primary_rate": self.primary_rate_input.value(),
+                "primary_share_rate": self.primary_share_input.value(),
+                "admin_rate": self.admin_rate_input.value(),
+            })
+            self.refresh_table()
+            self.statusBar().showMessage("Суммы для расчётов сохранены.", 5000)
+        except Exception as exc:
+            QMessageBox.warning(self, "Не удалось сохранить суммы", str(exc))
+
+    def create_auto_backup(self):
+        try:
+            self.backup_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db.backup_to(self.backup_path)
+            if hasattr(self, "backup_path_label"):
+                self.backup_path_label.setText(f"Файл копии: {self.backup_path} · обновлено автоматически")
+        except Exception as exc:
+            self.statusBar().showMessage(f"Не удалось создать резервную копию: {exc}", 10000)
+
+    def backup_database(self):
+        try:
+            self.create_auto_backup()
+            QMessageBox.information(self, "Резервная копия", f"Резервная копия обновлена:\n{self.backup_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
+
+    def restore_database(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите резервную копию для восстановления",
+            str(self.backup_path if self.backup_path.exists() else APP_DATA / "backups"),
+            "Резервная копия SQLite (*.sqlite3 *.db)"
+        )
+        if not path:
+            return
+        answer = QMessageBox.warning(
+            self, "Восстановление базы",
+            "Текущие данные будут заменены данными из выбранной резервной копии. "
+            "Перед восстановлением программа сохранит текущую базу в автоматическую копию. Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.create_auto_backup()
+            self.db.restore_from(path)
+            self.refresh_table()
+            self.refresh_scan_queue()
+            rates = self.db.get_rates()
+            self.primary_rate_input.setValue(rates["primary_rate"])
+            self.primary_share_input.setValue(rates["primary_share_rate"])
+            self.admin_rate_input.setValue(rates["admin_rate"])
+            QMessageBox.information(self, "Восстановление завершено", "Данные восстановлены из резервной копии.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка восстановления", str(exc))
 
     def refresh_table(self, *_):
         if not hasattr(self, "table"):
@@ -894,19 +1006,6 @@ class MainWindow(QMainWindow):
         preview = ReportPreviewDialog(self, records, batches, years, default_year, self.db.get_rates())
         preview.exec()
 
-    def backup_database(self):
-        default = str(APP_DATA / f"yurkon_archive_backup_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
-        path, _ = QFileDialog.getSaveFileName(self, "Сохранить резервную копию базы", default, "SQLite (*.sqlite3)")
-        if not path:
-            return
-        if not path.lower().endswith(".sqlite3"):
-            path += ".sqlite3"
-        try:
-            self.db.backup_to(path)
-            QMessageBox.information(self, "Резервная копия создана", f"База сохранена:\n{path}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
-
     def refresh_scan_queue(self):
         files = self.file_manager.get_new_files()
         selected_path = self.current_pdf
@@ -1004,9 +1103,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         try:
             self.watcher.stop()
-            backup_dir = APP_DATA / "backups"
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            self.db.backup_to(backup_dir / f"yurkon_archive_{datetime.now():%Y%m%d_%H%M%S}.sqlite3")
+            self._backup_timer.stop()
+            self.backup_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db.backup_to(self.backup_path)
         finally:
             self.db.close()
         super().closeEvent(event)
