@@ -86,7 +86,7 @@ def _build_summary(ws, records, batches, year, rates):
     for key in sorted(keys, key=lambda x: (x[0], x[1], month_order.get(x[2], 99))):
         group = groups.get(key, [])
         batch = batch_map.get(key, {})
-        display_executor = next((str(r.get("executor") or "") for r in group if r.get("executor")), key[1])
+        display_executor = next((str(r.get("executor") or "") for r in group if r.get("executor")), str(batch.get("executor") or key[1]))
         rows.append([
             f"{display_executor} - {key[2]}".strip(" -"),
             len(group),
@@ -138,7 +138,7 @@ def _build_annual(ws, records, batches, year, rates):
         executor_rows.append([executor, len(group), sum(int(r.get("workplaces") or 0) for r in group),
                               fee, share, admin, share + admin])
     executor_total = ["ИТОГО"] + [sum(row[col] for row in executor_rows) for col in range(1, 7)]
-    start = 3 + len(month_rows) + 3
+    start = 20
     _set_rows(ws, "По исполнителям", executor_headers, executor_rows, executor_total, start_row=start)
 
     primary_paid = primary_wait = admin_paid = admin_wait = 0
