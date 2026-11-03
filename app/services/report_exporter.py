@@ -213,14 +213,18 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
     if not template_path.exists():
         raise FileNotFoundError(f"Не найден шаблон отчёта: {template_path}")
     wb = load_workbook(template_path)
-    required = {"2026 Сводка по партиям", "2026 Отчёт руководителю", "2026 Годовой отчет"}
-    if not required.issubset(set(wb.sheetnames)):
-        raise ValueError("Шаблон не похож на «2026_учет_контор.xlsx»: не найдены три листа отчётности.")
+    suffixes = ("Сводка по партиям", "Отчёт руководителю", "Годовой отчет")
+    source_sheets = {}
+    for suffix in suffixes:
+        found = next((name for name in wb.sheetnames if name.endswith(" " + suffix)), None)
+        if not found:
+            raise ValueError("В шаблоне не найдены все три листа отчётности.")
+        source_sheets[suffix] = found
     records = [dict(r) for r in records if int(r.get("year") or year) == int(year)]
     batches = [dict(b) for b in batches if int(b.get("year") or year) == int(year)]
-    sw = wb["2026 Сводка по партиям"]
-    yw = wb["2026 Годовой отчет"]
-    mw = wb["2026 Отчёт руководителю"]
+    sw = wb[source_sheets["Сводка по партиям"]]
+    yw = wb[source_sheets["Годовой отчет"]]
+    mw = wb[source_sheets["Отчёт руководителю"]]
     _fill_summary(sw, records, batches, year)
     _fill_yearly(yw, records, batches, year)
     parties = sorted({_party(r) for r in records if _party(r)})
@@ -229,10 +233,10 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
     _fill_manager(mw, records, party, manager_kind)
 
     # Replace year labels and table references. Report tabs are retained in preview workbook.
-    for suffix in ("Сводка по партиям", "Отчёт руководителю", "Годовой отчет"):
-        old = f"2026 {suffix}"
-        if year != 2026 and old in wb.sheetnames:
-            wb[old].title = f"{year} {suffix}"
+    for suffix, old_name in source_sheets.items():
+        new_name = f"{year} {suffix}"
+        if old_name != new_name:
+            wb[old_name].title = new_name
     if report_type != "all":
         selected = {"summary": f"{year} Сводка по партиям",
                     "annual": f"{year} Годовой отчет",
