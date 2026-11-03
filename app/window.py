@@ -454,7 +454,7 @@ class ReportPreviewDialog(QDialog):
             max_col = ws.max_column
             for row_num in range(1, ws.max_row + 1):
                 values = [ws.cell(row_num, col).value for col in range(1, max_col + 1)]
-                if any(value not in (None, "") for value in values):
+                if report_type == "annual" or any(value not in (None, "") for value in values):
                     visible.append((row_num, values))
             table = page["table"]
             table.clear()
