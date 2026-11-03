@@ -108,6 +108,28 @@ class DatabaseTests(unittest.TestCase):
         record = self.db.list_records()[0]
         self.assertEqual(record["archive_index"], "ИЛ-10-0555/2026")
 
+
+    def test_legacy_import_reads_only_five_fields_and_detects_year(self):
+        from openpyxl import Workbook
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "2027 Реестр"
+            ws.append(["№","Исполнитель","Месяц","Партия","№ документа","Название конторы","Кол-во рабочих мест",
+                       "Первичка: к получению (по 20 ₽)","Первичка: моя доля (по 10 ₽)",
+                       "Админ. работа выполнена (дата)","Админ. сумма (100 ₽)"])
+            ws.append([1,"Лилия","январь",None,"10/2027","ООО Тест",4,999,999,"2027-01-10",100])
+            wb.save(path)
+            result = self.db.import_legacy_workbook(path)
+            self.assertEqual(result["imported"], 1)
+            record = self.db.list_records()[0]
+            self.assertEqual(record["year"], 2027)
+            self.assertEqual(record["workplaces"], 4)
+            self.assertIsNone(record["admin_done_date"])
+            self.assertIsNone(record["assembled_date"])
+            self.assertIsNone(record["scanned_date"])
+
     def test_calculation_fields(self):
         self.db.add_record({"executor":"Аня","month":"октябрь","protocol":"1234/2026",
                             "organization":"ООО Тест","workplaces":7,"admin_done_date":"2026-10-01"})
