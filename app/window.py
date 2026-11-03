@@ -6,6 +6,7 @@ import tempfile
 from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
+from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
@@ -721,8 +722,11 @@ class MainWindow(QMainWindow):
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
             workplaces = int(record["workplaces"] or 0)
-            fee, share = workplaces * 20, workplaces * 10
-            admin = 100 if record["admin_done_date"] else 0
+            rates = self.db.get_rates()
+            fee = workplaces * rates["primary_rate"]
+            share = workplaces * rates["primary_share_rate"]
+            custom_admin = record.get("admin_amount")
+            admin = (int(custom_admin) if custom_admin not in (None, "") else rates["admin_rate"]) if record["admin_done_date"] else 0
             total_workplaces += workplaces
             total_fee += fee
             total_share += share
@@ -765,7 +769,10 @@ class MainWindow(QMainWindow):
             if item.column() == 12:
                 admin_item = self.table.item(row, 9)
                 old_amount = int(admin_item.text() or 0) if admin_item else 0
-                new_amount = 100 if stamp else 0
+                record = self.db.get_record(int(record_id))
+                rates = self.db.get_rates()
+                custom = record["admin_amount"] if record else None
+                new_amount = (int(custom) if custom not in (None, "") else rates["admin_rate"]) if stamp else 0
                 if admin_item:
                     admin_item.setText(str(new_amount))
                 # Update the visible summary only; do not reload the full registry.
@@ -865,7 +872,6 @@ class MainWindow(QMainWindow):
             return
         try:
             result = self.db.import_legacy_workbook(path)
-            self.db.set_setting("report_template", path)
             self.refresh_table()
             QMessageBox.information(
                 self, "Загрузка завершена",
@@ -877,15 +883,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка импорта", str(exc))
 
     def export_reports(self):
-        template = self.db.get_setting("report_template")
-        if not template or not Path(template).exists():
-            template, _ = QFileDialog.getOpenFileName(
-                self, "Выберите исходный файл 2026_учет_контор.xlsx",
-                str(APP_DATA), "Excel (*.xlsx *.xlsm)"
-            )
-            if not template:
-                return
-            self.db.set_setting("report_template", template)
         records = [dict(r) for r in self.db.list_records()]
         if not records:
             QMessageBox.information(self, "Нет данных", "Сначала добавьте или загрузите организации.")
@@ -894,7 +891,7 @@ class MainWindow(QMainWindow):
         current_filter = self.filter_boxes["year"].currentData()
         default_year = int(current_filter) if current_filter and str(current_filter).isdigit() and int(current_filter) in years else years[0]
         batches = [dict(b) for b in self.db.list_batches()]
-        preview = ReportPreviewDialog(self, template, records, batches, years, default_year)
+        preview = ReportPreviewDialog(self, records, batches, years, default_year, self.db.get_rates())
         preview.exec()
 
     def backup_database(self):
