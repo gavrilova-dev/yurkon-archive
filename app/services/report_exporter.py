@@ -237,6 +237,11 @@ def export_report(template_path: str | Path, output_path: str | Path, records, b
         for name in list(wb.sheetnames):
             if name != selected:
                 del wb[name]
+        # The manager template's party dropdown points to the summary sheet,
+        # which is intentionally absent from a standalone report file.
+        if report_type == "manager":
+            wb[selected].data_validations.dataValidation = []
+        wb.defined_names.clear()
     try:
         wb.calculation.fullCalcOnLoad = False
         wb.calculation.forceFullCalc = False
