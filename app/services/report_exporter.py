@@ -166,43 +166,53 @@ def _clear_cells(ws, min_row, max_row, min_col=1, max_col=5):
                 cell.value = None
 
 
+def _unmerge_if_present(ws, reference):
+    if reference in {str(item) for item in ws.merged_cells.ranges}:
+        ws.unmerge_cells(reference)
+
+
 def _fill_manager(ws, records, party, manager_kind):
     ws["B3"] = party
     chosen = _party_records(records, party)
     primary = sorted(chosen, key=lambda r: str(r.get("protocol") or ""))
     admin = [r for r in primary if r.get("admin_done_date")]
     if manager_kind == "primary":
-        _clear_cells(ws, 139, 273)
-        ws["A5"] = "ОТЧЁТ ПО ПАРТИИ КОНТОР — ПЕРВИЧНАЯ ДОКУМЕНТАЦИЯ"
+        _unmerge_if_present(ws, "A139:E139")
+        _unmerge_if_present(ws, "A273:C273")
+        ws["A5"] = "БЛОК 1. ПЕРВИЧНАЯ ДОКУМЕНТАЦИЯ (оплата по 20 ₽ за рабочее место)"
         for i, rec in enumerate(primary[:130], 7):
             vals = [rec.get("protocol"), rec.get("organization"), int(rec.get("workplaces") or 0),
                     int(rec.get("workplaces") or 0) * 20]
             for c, value in enumerate(vals, 1):
                 ws.cell(i, c).value = value
+        for row in range(7 + min(len(primary), 130), 137):
+            for col in range(1, 5):
+                ws.cell(row, col).value = None
         ws["B137"] = "ИТОГО ПО ПЕРВИЧНОЙ ДОКУМЕНТАЦИИ:"
         ws["C137"] = len(primary)
         ws["D137"] = sum(int(r.get("workplaces") or 0) * 20 for r in primary)
-        ws["A139"] = None
-        ws["A273"] = None
+        ws.delete_rows(138, max(0, ws.max_row - 137))
     else:
-        _clear_cells(ws, 5, 138)
-        ws["A139"] = "ОТЧЁТ ПО ПАРТИИ КОНТОР — АДМИНИСТРАТИВНАЯ РАБОТА"
+        _unmerge_if_present(ws, "A5:E5")
+        _unmerge_if_present(ws, "A139:E139")
+        _unmerge_if_present(ws, "A273:C273")
+        ws["A139"] = "БЛОК 2. АДМИНИСТРАТИВНАЯ РАБОТА (оплата 100 ₽ за контору)"
         for i, rec in enumerate(admin[:130], 141):
             vals = [rec.get("protocol"), rec.get("organization"), _date(rec.get("admin_done_date")), 100]
             for c, value in enumerate(vals, 1):
                 ws.cell(i, c).value = value
+        for row in range(141 + min(len(admin), 130), 271):
+            for col in range(1, 5):
+                ws.cell(row, col).value = None
         ws["B271"] = "ИТОГО ПО АДМИН. РАБОТЕ:"
         ws["C271"] = len(admin)
         ws["D271"] = len(admin) * 100
-        ws["A273"] = None
-    # Remove all leftover formula cells in both report blocks.
-    if manager_kind == "primary":
-        for row in range(7 + min(len(primary),130), 137):
-            for col in range(1,5): ws.cell(row,col).value = None
-    else:
-        for row in range(141 + min(len(admin),130), 271):
-            for col in range(1,5): ws.cell(row,col).value = None
-    ws["D273"] = None
+        ws.delete_rows(5, 134)
+        ws.merge_cells("A5:E5")
+        # The admin section now occupies the same compact layout as the primary report.
+        ws["A5"] = "БЛОК 2. АДМИНИСТРАТИВНАЯ РАБОТА (оплата 100 ₽ за контору)"
+        ws.delete_rows(138, max(0, ws.max_row - 137))
+    ws.print_area = "A1:D137"
 
 
 def export_report(template_path: str | Path, output_path: str | Path, records, batches,
