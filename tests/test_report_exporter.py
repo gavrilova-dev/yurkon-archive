@@ -92,9 +92,9 @@ class ReportExporterTests(unittest.TestCase):
             result = load_workbook(output, data_only=False)
             self.assertEqual(result.sheetnames, ["2027 Отчёт руководителю"])
             ws = result.active
-            self.assertEqual(ws["A141"].value, "1/2027")
-            self.assertEqual(ws["D141"].value, 100)
-            self.assertEqual(ws["C271"].value, 1)
+            self.assertEqual(ws["A7"].value, "1/2027")
+            self.assertEqual(ws["D7"].value, 100)
+            self.assertEqual(ws["C137"].value, 1)
             for row in ws.iter_rows():
                 for cell in row:
                     self.assertFalse(isinstance(cell.value, str) and cell.value.startswith("="))
