@@ -86,6 +86,9 @@ class Database:
             self.connection.execute("ALTER TABLE primary_records ADD COLUMN yandex_uploaded_date TEXT")
         if "year" not in columns:
             self.connection.execute("ALTER TABLE primary_records ADD COLUMN year INTEGER NOT NULL DEFAULT 2026")
+        for column in ("primary_rate", "primary_share_rate", "admin_rate"):
+            if column not in columns:
+                self.connection.execute(f"ALTER TABLE primary_records ADD COLUMN {column} INTEGER")
         batch_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(batches)")}
         if "year" not in batch_columns:
             self.connection.execute("ALTER TABLE batches RENAME TO batches_old")
@@ -117,6 +120,15 @@ class Database:
         defaults = {"primary_rate": "20", "primary_share_rate": "10", "admin_rate": "100"}
         for key, value in defaults.items():
             self.connection.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
+        current_rates = {key: int(self.get_setting(key, value)) for key, value in defaults.items()}
+        self.connection.execute("""
+            UPDATE primary_records
+            SET primary_rate=COALESCE(primary_rate, ?),
+                primary_share_rate=COALESCE(primary_share_rate, ?),
+                admin_rate=COALESCE(admin_rate, ?)
+            WHERE primary_rate IS NULL OR primary_share_rate IS NULL OR admin_rate IS NULL
+        """, (current_rates["primary_rate"], current_rates["primary_share_rate"],
+              current_rates["admin_rate"]))
         self.connection.execute("CREATE INDEX IF NOT EXISTS idx_archive_protocol_norm ON archive_records(protocol_norm)")
         self.connection.commit()
 
@@ -218,8 +230,11 @@ class Database:
             "executor", "month", "year", "protocol", "organization", "workplaces", "admin_amount",
             "admin_done_date", "assembled_date", "returned_date", "signed_date",
             "scanned_date", "yandex_uploaded_date", "pdf_path", "notes",
+            "primary_rate", "primary_share_rate", "admin_rate",
         )
-        values = [data.get(k) for k in fields]
+        current_rates = self.get_rates()
+        values = [data.get(k) for k in fields[:15]]
+        values.extend(current_rates[key] for key in ("primary_rate", "primary_share_rate", "admin_rate"))
         values[2] = int(values[2] or date.today().year)
         values[5] = int(values[5] or 0)
         values[6] = int(values[6]) if values[6] not in (None, "") else None
@@ -456,11 +471,14 @@ class Database:
                 if self.find_duplicate_protocol(protocol):
                     skipped += 1
                     continue
+                rates = self.get_rates()
                 self.connection.execute("""
                     INSERT INTO primary_records
-                    (executor,month,year,protocol,organization,workplaces)
-                    VALUES(?,?,?,?,?,?)
-                """, (executor, month, year, protocol, organization, workplaces))
+                    (executor,month,year,protocol,organization,workplaces,
+                     primary_rate,primary_share_rate,admin_rate)
+                    VALUES(?,?,?,?,?,?,?,?,?)
+                """, (executor, month, year, protocol, organization, workplaces,
+                      rates["primary_rate"], rates["primary_share_rate"], rates["admin_rate"]))
                 imported += 1
         wb.close()
         self.ensure_batches_for_records()
