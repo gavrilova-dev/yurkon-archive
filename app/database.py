@@ -414,11 +414,7 @@ class Database:
                 except (TypeError, ValueError):
                     workplaces = 0
                 normalized = self._norm(protocol).replace(" ", "").replace("ё", "е")
-                duplicate = self.connection.execute(
-                    "SELECT id FROM primary_records WHERE replace(replace(lower(protocol),' ',''),'ё','е')=? LIMIT 1",
-                    (normalized,),
-                ).fetchone()
-                if duplicate:
+                if self.find_duplicate_protocol(protocol):
                     skipped += 1
                     continue
                 self.connection.execute("""
