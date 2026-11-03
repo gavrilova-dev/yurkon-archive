@@ -112,6 +112,9 @@ def _fill_yearly(ws, records, batches, year):
         ws.cell(17, c).value = value
 
     executors = sorted({str(r.get("executor") or "") for r in records if r.get("executor")})
+    extra_executor_rows = max(0, len(executors) - 3)
+    if extra_executor_rows:
+        ws.insert_rows(24, extra_executor_rows)
     for offset, executor in enumerate(executors):
         row = 21 + offset
         if row > 22:
@@ -144,9 +147,10 @@ def _fill_yearly(ws, records, batches, year):
             admin_paid += admin_amount
         else:
             admin_wait += admin_amount
-    for row, value in zip(range(26, 30), [primary_paid, primary_wait, admin_paid, admin_wait]):
+    payment_rows = range(26 + extra_executor_rows, 30 + extra_executor_rows)
+    for row, value in zip(payment_rows, [primary_paid, primary_wait, admin_paid, admin_wait]):
         ws.cell(row, 2).value = value
-    for row in (4, 20, 25):
+    for row in (4, 20, 25 + extra_executor_rows):
         for cell in ws[row]:
             if cell.value is not None:
                 font = copy(cell.font)
