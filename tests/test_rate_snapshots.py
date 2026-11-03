@@ -49,6 +49,31 @@ class RateSnapshotTests(unittest.TestCase):
             finally:
                 migrated.close()
 
+    def test_mark_scanned_reports_when_record_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "archive.sqlite3")
+            try:
+                result = db.mark_scanned("404/2026", "Неизвестная организация",
+                                         "ready/404.pdf", "2026-11-03")
+                self.assertFalse(result)
+            finally:
+                db.close()
+
+    def test_mark_scanned_returns_true_and_saves_status_for_matching_record(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "archive.sqlite3")
+            try:
+                rid = db.add_record({"executor":"Тест","month":"ноябрь","year":2026,
+                    "protocol":"55/2026","organization":"ООО Проверка","workplaces":1})
+                result = db.mark_scanned("55/2026", "ООО Проверка",
+                                         "ready/55-2026.pdf", "2026-11-03")
+                self.assertTrue(result)
+                record = dict(db.get_record(rid))
+                self.assertEqual(record["scanned_date"], "2026-11-03")
+                self.assertEqual(record["pdf_path"], "ready/55-2026.pdf")
+            finally:
+                db.close()
+
     def test_custom_admin_amount_remains_override(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "archive.sqlite3")
