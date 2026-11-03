@@ -385,85 +385,48 @@ class Database:
                 )
 
     def import_legacy_workbook(self, path: str | Path) -> dict[str, int]:
+        """Import only the five source fields. All statuses, fees and batch controls are app-owned."""
         from openpyxl import load_workbook
+        import re
 
-        wb = load_workbook(path, data_only=True)
-        if "2026 Реестр" not in wb.sheetnames:
-            raise ValueError("В книге нет листа «2026 Реестр».")
-        ws = wb["2026 Реестр"]
-        imported = 0
-        statuses_updated = 0
+        wb = load_workbook(path, data_only=True, read_only=True)
+        registry_name = next((name for name in wb.sheetnames if re.fullmatch(r"\\d{4} Реестр", name)), None)
+        if not registry_name:
+            wb.close()
+            raise ValueError("В книге не найден лист вида «2026 Реестр».")
+        year = int(registry_name.split()[0])
+        ws = wb[registry_name]
+        imported = skipped = 0
         with self.connection:
-            for r in range(2, ws.max_row + 1):
-                executor, month = ws.cell(r,2).value, ws.cell(r,3).value
-                protocol, organization = ws.cell(r,5).value, ws.cell(r,6).value
-                if not protocol and not organization:
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                # Source workbook columns: B executor, C month, E protocol, F organization, G workplaces.
+                if len(row) < 7:
                     continue
+                executor, month, protocol, organization, workplaces = row[1], row[2], row[4], row[5], row[6]
                 if not protocol or not organization:
                     continue
-                workplaces = ws.cell(r,7).value or 0
+                protocol = str(protocol).strip()
+                organization = str(organization).strip()
+                executor = str(executor or "").strip()
+                month = str(month or "").strip().casefold()
                 try:
-                    workplaces = int(workplaces)
+                    workplaces = int(float(workplaces or 0))
                 except (TypeError, ValueError):
                     workplaces = 0
-                admin_done = ws.cell(r,10).value
-                admin_fee = ws.cell(r,11).value
-                try:
-                    paid_100 = float(str(admin_fee).replace(",", ".")) == 100.0
-                except (TypeError, ValueError):
-                    paid_100 = False
-                status_date = date.today().isoformat() if paid_100 else None
-                data = {
-                    "executor": str(executor or ""),
-                    "month": str(month or "").casefold(),
-                    "year": 2026,
-                    "protocol": str(protocol).strip(),
-                    "organization": str(organization).strip(),
-                    "workplaces": workplaces,
-                    "admin_done_date": admin_done,
-                }
+                normalized = self._norm(protocol).replace(" ", "").replace("ё", "е")
+                duplicate = self.connection.execute(
+                    "SELECT id FROM primary_records WHERE replace(replace(lower(protocol),' ',''),'ё','е')=? LIMIT 1",
+                    (normalized,),
+                ).fetchone()
+                if duplicate:
+                    skipped += 1
+                    continue
                 self.connection.execute("""
                     INSERT INTO primary_records
-                    (executor,month,year,protocol,organization,workplaces,admin_done_date,assembled_date,scanned_date)
-                    SELECT ?,?,?,?,?,?,?,?,?
-                    WHERE NOT EXISTS (
-                      SELECT 1 FROM primary_records
-                      WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
-                    )
-                """, (data["executor"],data["month"],data["year"],data["protocol"],data["organization"],
-                      workplaces,(self._date(data["admin_done_date"]) or status_date),status_date,status_date,
-                      data["protocol"],data["organization"],data["executor"],data["month"],data["year"]))
-                imported += self.connection.execute("SELECT changes()").fetchone()[0]
-                if paid_100:
-                    self.connection.execute("""
-                        UPDATE primary_records
-                        SET admin_done_date=COALESCE(admin_done_date,?),
-                            assembled_date=COALESCE(assembled_date,?),
-                            scanned_date=COALESCE(scanned_date,?)
-                        WHERE protocol=? AND organization=? AND executor=? AND month=? AND year=?
-                    """, (status_date,status_date,status_date,data["protocol"],data["organization"],
-                          data["executor"],data["month"],data["year"]))
-                    statuses_updated += self.connection.execute("SELECT changes()").fetchone()[0]
-
-        self.ensure_batches_for_records()
-        if "2026 Сводка по партиям" in wb.sheetnames:
-            sw = wb["2026 Сводка по партиям"]
-            for r in range(5, sw.max_row + 1):
-                party = sw.cell(r,1).value
-                if not party or str(party).startswith("ИТОГО"):
-                    continue
-                parts = str(party).split(" - ",1)
-                if len(parts) != 2:
-                    continue
-                self.save_batch({
-                    "executor": parts[0].strip(), "month": parts[1].strip().casefold(), "year": 2026,
-                    "primary_given_date": sw.cell(r,3).value,
-                    "primary_returned_date": sw.cell(r,4).value,
-                    "primary_report_date": sw.cell(r,7).value,
-                    "primary_paid_date": sw.cell(r,8).value,
-                    "admin_report_date": sw.cell(r,11).value,
-                    "admin_paid_date": sw.cell(r,12).value,
-                    "comment": sw.cell(r,13).value or "",
-                })
+                    (executor,month,year,protocol,organization,workplaces)
+                    VALUES(?,?,?,?,?,?)
+                """, (executor, month, year, protocol, organization, workplaces))
+                imported += 1
         wb.close()
-        return {"imported": imported, "statuses_updated": statuses_updated}
+        self.ensure_batches_for_records()
+        return {"imported": imported, "skipped": skipped, "statuses_updated": 0}
