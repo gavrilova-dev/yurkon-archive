@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
-    QGroupBox, QHeaderView, QAbstractItemView,
+    QGroupBox, QHeaderView, QAbstractItemView, QIntValidator,
 )
 
 from app.config import APP_DATA, DATABASE_PATH, INCOMING_FOLDER, READY_FOLDER, ARCHIVE_JOURNAL_DEFAULT
@@ -94,6 +94,9 @@ class RecordDialog(QDialog):
         self.workplaces = QSpinBox()
         self.workplaces.setRange(0, 100000)
         self.workplaces.setValue(int(data.get("workplaces") or 0))
+        self.admin_amount = QLineEdit("" if data.get("admin_amount") in (None, "") else str(data.get("admin_amount")))
+        self.admin_amount.setPlaceholderText("По умолчанию")
+        self.admin_amount.setValidator(QIntValidator(0, 100000000, self))
 
         self.admin_done = OptionalDate()
         self.assembled = OptionalDate()
@@ -112,6 +115,7 @@ class RecordDialog(QDialog):
         form.addRow("Номер протокола", self.protocol)
         form.addRow("Организация", self.organization)
         form.addRow("Рабочих мест", self.workplaces)
+        form.addRow("Сумма за админ. работу, ₽ (пусто — по умолчанию)", self.admin_amount)
         form.addRow("Административная работа выполнена", self.admin_done)
         form.addRow("Документы собраны", self.assembled)
         form.addRow("Выгружено на Яндекс.Диск", self.yandex_uploaded)
@@ -134,6 +138,7 @@ class RecordDialog(QDialog):
             "protocol": self.protocol.text().strip(),
             "organization": self.organization.text().strip(),
             "workplaces": self.workplaces.value(),
+            "admin_amount": int(self.admin_amount.text()) if self.admin_amount.text().strip() else None,
             "admin_done_date": self.admin_done.value(),
             "assembled_date": self.assembled.value(),
             "yandex_uploaded_date": self.yandex_uploaded.value(),
@@ -224,6 +229,7 @@ class BatchManagerDialog(QDialog):
     def __init__(self, parent, db):
         super().__init__(parent)
         self.db = db
+        self.rates = db.get_rates()
         self.setWindowTitle("Контроль партий")
         self.resize(1450, 650)
         layout = QVBoxLayout(self)
@@ -279,10 +285,10 @@ class BatchManagerDialog(QDialog):
                 batch["executor"], batch["month"], batch["year"], status, totals.get("count", 0),
                 _display_date(batch.get("primary_given_date")),
                 _display_date(batch.get("primary_returned_date")),
-                workplaces * 20, workplaces * 10,
+                workplaces * self.rates["primary_rate"], workplaces * self.rates["primary_share_rate"],
                 _display_date(batch.get("primary_report_date")),
                 _display_date(batch.get("primary_paid_date")),
-                admin_count, admin_count * 100,
+                admin_count, sum((int(rec.get("admin_amount")) if rec.get("admin_amount") not in (None, "") else self.rates["admin_rate"]) for rec in records if rec["executor"] == batch["executor"] and rec["month"] == batch["month"] and rec["year"] == batch["year"] and rec.get("admin_done_date")),
                 _display_date(batch.get("admin_report_date")),
                 _display_date(batch.get("admin_paid_date")),
                 batch.get("comment") or "",
@@ -351,13 +357,13 @@ class ReportPreviewDialog(QDialog):
         ("annual", "Годовой отчет"),
     ]
 
-    def __init__(self, parent, template_path, records, batches, years, default_year):
+    def __init__(self, parent, records, batches, years, default_year, rates):
         super().__init__(parent)
         self.setWindowTitle("Отчётность")
         self.resize(1450, 850)
-        self.template_path = str(template_path)
         self.records = [dict(r) for r in records]
         self.batches = [dict(b) for b in batches]
+        self.rates = dict(rates)
         self.years = [str(y) for y in years]
         self.temp_dir = tempfile.TemporaryDirectory()
         self.pages = {}
@@ -446,8 +452,8 @@ class ReportPreviewDialog(QDialog):
                 page["party"].setCurrentText(party)
         preview_path = Path(self.temp_dir.name) / f"preview_{report_type}_{year}_{kind}.xlsx"
         try:
-            export_report(self.template_path, preview_path, self.records, self.batches,
-                          year, report_type=report_type, party=party, manager_kind=kind)
+            export_report(None, preview_path, self.records, self.batches,
+                          year, report_type=report_type, party=party, manager_kind=kind, rates=self.rates)
             wb = load_workbook(preview_path, data_only=True, read_only=False)
             sheet_suffix = {"summary": "Сводка по партиям", "manager": "Отчёт руководителю",
                             "annual": "Годовой отчет"}[report_type]
@@ -487,16 +493,15 @@ class ReportPreviewDialog(QDialog):
             "annual": "Годовой_отчет",
             "manager": "Отчет_руководителю_" + ("Первичка" if kind == "primary" else "Административная_работа"),
         }[report_type]
-        default = str(Path(self.template_path).with_name(
-            f"{suffix}_{year}_{date.today():%Y-%m-%d}.xlsx"))
+        default = str(APP_DATA / f"{suffix}_{year}_{date.today():%Y-%m-%d}.xlsx")
         output, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default, "Excel (*.xlsx)")
         if not output:
             return
         if not output.lower().endswith(".xlsx"):
             output += ".xlsx"
         try:
-            export_report(self.template_path, output, self.records, self.batches,
-                          year, report_type=report_type, party=party, manager_kind=kind)
+            export_report(None, output, self.records, self.batches,
+                          year, report_type=report_type, party=party, manager_kind=kind, rates=self.rates)
             QMessageBox.information(self, "Экспорт готов", f"Отчёт сохранён:\n{output}")
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка экспорта", str(exc))
