@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from copy import copy
 from pathlib import Path
 from datetime import date, datetime
-from openpyxl import load_workbook
-from openpyxl.cell.cell import MergedCell
+from openpyxl import Workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
+MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+          "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 
 
 def _date(value):
@@ -20,253 +20,204 @@ def _date(value):
     try:
         return datetime.fromisoformat(str(value)[:10])
     except (ValueError, TypeError):
-        return value
-
-
-def _copy_row_style(ws, source_row, target_row, max_col):
-    if source_row == target_row:
-        return
-    for col in range(1, max_col + 1):
-        src, dst = ws.cell(source_row, col), ws.cell(target_row, col)
-        if src.has_style:
-            dst._style = copy(src._style)
-        if src.number_format:
-            dst.number_format = src.number_format
-        if src.alignment:
-            dst.alignment = copy(src.alignment)
-    if source_row in ws.row_dimensions:
-        ws.row_dimensions[target_row].height = ws.row_dimensions[source_row].height
+        return str(value)
 
 
 def _party(record):
     return f'{record.get("executor") or ""} - {record.get("month") or ""}'.strip(" -")
 
 
-def _sum(records, key):
-    return sum(float(r.get(key) or 0) for r in records)
+def _admin_amount(record, rates):
+    if not record.get("admin_done_date"):
+        return 0
+    value = record.get("admin_amount")
+    return int(value) if value not in (None, "") else int(rates["admin_rate"])
 
 
-def _party_records(records, party):
-    return [r for r in records if _party(r).casefold() == party.casefold()]
+def _set_rows(ws, title, headers, rows, total=None, start_row=3):
+    ws.cell(1, 1, title).font = Font(bold=True, size=12)
+    header_row = start_row
+    for col, value in enumerate(headers, 1):
+        cell = ws.cell(header_row, col, value)
+        cell.font = Font(bold=True)
+    for row_index, row in enumerate(rows, header_row + 1):
+        for col, value in enumerate(row, 1):
+            ws.cell(row_index, col, value)
+    last_row = header_row + len(rows)
+    if total is not None:
+        total_row = last_row + 1
+        for col, value in enumerate(total, 1):
+            cell = ws.cell(total_row, col, value)
+            cell.font = Font(bold=True)
+        last_row = total_row
+    for col in range(1, len(headers) + 1):
+        values = [str(ws.cell(row, col).value or "") for row in range(1, last_row + 1)]
+        width = min(max(max((len(v) for v in values), default=10) + 2, 12), 42)
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.freeze_panes = ws.cell(header_row + 1, 1).coordinate
+    ws.sheet_view.showGridLines = True
+    return last_row
 
 
-def _fill_summary(ws, records, batches, year):
-    ws["A1"] = f"Сводка по партиям — {year}"
+def _build_summary(ws, records, batches, year, rates):
+    headers = [
+        "Партия", "Кол-во контор", "Первичка отдана", "Первичка возвращена",
+        "К получению, ₽", "Моя доля, ₽", "Отчёт по первичке сдан",
+        "Первичка оплачена", "Админ. выполнено", "Админ. сумма, ₽",
+        "Отчёт по админ. работе сдан", "Админ. работа оплачена", "Комментарий",
+    ]
+    batch_map = {
+        (int(b.get("year") or year), str(b.get("executor") or "").casefold(),
+         str(b.get("month") or "").casefold()): b for b in batches
+    }
+    groups = {}
+    for record in records:
+        key = (int(record.get("year") or year), str(record.get("executor") or "").casefold(),
+               str(record.get("month") or "").casefold())
+        groups.setdefault(key, []).append(record)
+    keys = set(groups)
+    keys.update(batch_map)
+    month_order = {m.casefold(): i for i, m in enumerate(MONTHS)}
     rows = []
-    batch_map = {(str(b["executor"]), str(b["month"]).casefold()): b for b in batches}
-    keys = sorted({(str(b["executor"]), str(b["month"]).casefold()) for b in batches},
-                  key=lambda x: (x[0].casefold(), MONTHS.index(x[1].capitalize()) if x[1].capitalize() in MONTHS else 99))
-    record_groups = {}
-    for rec in records:
-        record_groups.setdefault((str(rec.get("executor") or ""), str(rec.get("month") or "").casefold()), []).append(rec)
-    keys = sorted(set(keys) | set(record_groups), key=lambda x: (x[0].casefold(), MONTHS.index(x[1].capitalize()) if x[1].capitalize() in MONTHS else 99))
-    for i, key in enumerate(keys, 5):
+    for key in sorted(keys, key=lambda x: (x[0], x[1], month_order.get(x[2], 99))):
+        group = groups.get(key, [])
         batch = batch_map.get(key, {})
-        group = record_groups.get(key, [])
-        _copy_row_style(ws, 5, i, 13)
-        values = [
-            f"{key[0]} - {key[1]}",
+        rows.append([
+            f"{key[1].title()} - {key[2]}".strip(" -"),
             len(group),
             _date(batch.get("primary_given_date")),
             _date(batch.get("primary_returned_date")),
-            sum(int(r.get("workplaces") or 0) * 20 for r in group),
-            sum(int(r.get("workplaces") or 0) * 10 for r in group),
+            sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group),
+            sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group),
             _date(batch.get("primary_report_date")),
             _date(batch.get("primary_paid_date")),
             sum(1 for r in group if r.get("admin_done_date")),
-            sum(100 for r in group if r.get("admin_done_date")),
+            sum(_admin_amount(r, rates) for r in group),
             _date(batch.get("admin_report_date")),
             _date(batch.get("admin_paid_date")),
             batch.get("comment") or "",
-        ]
-        for c, value in enumerate(values, 1):
-            ws.cell(i, c).value = value
-        rows.append(values)
-    total_row = 5 + len(rows)
-    _copy_row_style(ws, max(5, ws.max_row), total_row, 13)
-    totals = ["ИТОГО ЗА ГОД", sum(x[1] for x in rows), None, None,
-              sum(x[4] for x in rows), sum(x[5] for x in rows), None, None,
-              sum(x[8] for x in rows), sum(x[9] for x in rows), None, None, None]
-    for c, value in enumerate(totals, 1):
-        ws.cell(total_row, c).value = value
-    for r in range(total_row + 1, ws.max_row + 1):
-        for c in range(1, 14):
-            ws.cell(r, c).value = None
-    if "Свод2026" in ws.tables:
-        ws.tables["Свод2026"].ref = f"A4:M{total_row-1}"
+        ])
+    total = [
+        "ИТОГО ЗА ГОД", sum(r[1] for r in rows), None, None,
+        sum(r[4] for r in rows), sum(r[5] for r in rows), None, None,
+        sum(r[8] for r in rows), sum(r[9] for r in rows), None, None, None,
+    ]
+    _set_rows(ws, f"Сводка по партиям — {year}", headers, rows, total)
 
 
-def _fill_yearly(ws, records, batches, year):
+def _build_annual(ws, records, batches, year, rates):
     ws["A1"] = f"ГОДОВОЙ ОТЧЁТ — {year}"
-    for i, month in enumerate(MONTHS, 5):
+    month_headers = ["Месяц", "Кол-во контор", "Рабочих мест", "К получению, ₽",
+                     "Моя доля, ₽", "Админ. работа, ₽", "Всего, ₽"]
+    month_rows = []
+    for month in MONTHS:
         group = [r for r in records if str(r.get("month") or "").casefold() == month.casefold()]
-        vals = [month, len(group), sum(int(r.get("workplaces") or 0) for r in group),
-                sum(int(r.get("workplaces") or 0) * 20 for r in group),
-                sum(int(r.get("workplaces") or 0) * 10 for r in group),
-                sum(100 for r in group if r.get("admin_done_date"))]
-        vals.append(vals[4] + vals[5])
-        for c, value in enumerate(vals, 1):
-            ws.cell(i, c).value = value
-    totals = ["ИТОГО ЗА ГОД"] + [sum(float(ws.cell(r, c).value or 0) for r in range(5, 17)) for c in range(2, 8)]
-    for c, value in enumerate(totals, 1):
-        ws.cell(17, c).value = value
+        fee = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
+        share = sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group)
+        admin = sum(_admin_amount(r, rates) for r in group)
+        month_rows.append([month, len(group), sum(int(r.get("workplaces") or 0) for r in group),
+                           fee, share, admin, share + admin])
+    month_total = ["ИТОГО ЗА ГОД"] + [sum(row[col] for row in month_rows) for col in range(1, 7)]
+    _set_rows(ws, f"Годовой отчёт — {year}", month_headers, month_rows, month_total, start_row=3)
 
-    executors = sorted({str(r.get("executor") or "") for r in records if r.get("executor")})
-    extra_executor_rows = max(0, len(executors) - 2)
-    if extra_executor_rows:
-        ws.insert_rows(24, extra_executor_rows)
-    for offset, executor in enumerate(executors):
-        row = 21 + offset
-        if row > 22:
-            _copy_row_style(ws, 22, row, 7)
+    executor_headers = ["Исполнитель", "Кол-во контор", "Рабочих мест", "К получению, ₽",
+                        "Моя доля, ₽", "Админ. работа, ₽", "Всего, ₽"]
+    executors = sorted({str(r.get("executor") or "") for r in records if r.get("executor")},
+                       key=str.casefold)
+    executor_rows = []
+    for executor in executors:
         group = [r for r in records if str(r.get("executor") or "") == executor]
-        vals = [executor, len(group), sum(int(r.get("workplaces") or 0) for r in group),
-                sum(int(r.get("workplaces") or 0) * 20 for r in group),
-                sum(int(r.get("workplaces") or 0) * 10 for r in group),
-                sum(100 for r in group if r.get("admin_done_date"))]
-        vals.append(vals[4] + vals[5])
-        for c, value in enumerate(vals, 1):
-            ws.cell(row, c).value = value
-    for row in range(21 + len(executors), 23):
-        for c in range(1, 8):
-            ws.cell(row, c).value = None
-    if "ГодПоИсполнителям" in ws.tables:
-        ws.tables["ГодПоИсполнителям"].ref = f"A20:G{max(20,20+len(executors))}"
+        fee = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
+        share = sum(int(r.get("workplaces") or 0) * rates["primary_share_rate"] for r in group)
+        admin = sum(_admin_amount(r, rates) for r in group)
+        executor_rows.append([executor, len(group), sum(int(r.get("workplaces") or 0) for r in group),
+                              fee, share, admin, share + admin])
+    executor_total = ["ИТОГО"] + [sum(row[col] for row in executor_rows) for col in range(1, 7)]
+    start = 3 + len(month_rows) + 3
+    _set_rows(ws, "По исполнителям", executor_headers, executor_rows, executor_total, start_row=start)
 
-    # Payment status summary is based only on manually entered payment dates in batch control.
     primary_paid = primary_wait = admin_paid = admin_wait = 0
-    for b in batches:
-        group = _party_records(records, f'{b.get("executor")} - {b.get("month")}')
-        primary_amount = sum(int(r.get("workplaces") or 0) * 20 for r in group)
-        admin_amount = sum(100 for r in group if r.get("admin_done_date"))
-        if b.get("primary_paid_date"):
+    for batch in batches:
+        key = (str(batch.get("executor") or "").casefold(), str(batch.get("month") or "").casefold())
+        group = [r for r in records if (str(r.get("executor") or "").casefold(),
+                                        str(r.get("month") or "").casefold()) == key]
+        primary_amount = sum(int(r.get("workplaces") or 0) * rates["primary_rate"] for r in group)
+        admin_amount = sum(_admin_amount(r, rates) for r in group)
+        if batch.get("primary_paid_date"):
             primary_paid += primary_amount
         else:
             primary_wait += primary_amount
-        if b.get("admin_paid_date"):
+        if batch.get("admin_paid_date"):
             admin_paid += admin_amount
         else:
             admin_wait += admin_amount
-    payment_rows = range(26 + extra_executor_rows, 30 + extra_executor_rows)
-    for row, value in zip(payment_rows, [primary_paid, primary_wait, admin_paid, admin_wait]):
-        ws.cell(row, 2).value = value
-    for row in (4, 20, 25 + extra_executor_rows):
-        for cell in ws[row]:
-            if cell.value is not None:
-                font = copy(cell.font)
-                font.bold = True
-                cell.font = font
+    payment_rows = [
+        ["Первичка оплачена", primary_paid],
+        ["Первичка ожидает оплаты", primary_wait],
+        ["Административная работа оплачена", admin_paid],
+        ["Административная работа ожидает оплаты", admin_wait],
+    ]
+    payment_start = start + len(executor_rows) + 5
+    _set_rows(ws, "Статус оплаты", ["Показатель", "Сумма, ₽"], payment_rows,
+              start_row=payment_start)
 
 
-def _clear_cells(ws, min_row, max_row, min_col=1, max_col=5):
-    for row in range(min_row, max_row + 1):
-        for col in range(min_col, max_col + 1):
-            cell = ws.cell(row, col)
-            if not isinstance(cell, MergedCell):
-                cell.value = None
-
-
-def _unmerge_if_present(ws, reference):
-    if reference in {str(item) for item in ws.merged_cells.ranges}:
-        ws.unmerge_cells(reference)
-
-
-def _fill_manager(ws, records, party, manager_kind):
-    ws["B3"] = party
-    chosen = _party_records(records, party)
-    primary = sorted(chosen, key=lambda r: str(r.get("protocol") or ""))
-    admin = [r for r in primary if r.get("admin_done_date")]
+def _build_manager(ws, records, party, manager_kind, rates):
+    group = [r for r in records if _party(r).casefold() == party.casefold()]
+    ws["A1"] = "ОТЧЁТ РУКОВОДИТЕЛЮ"
+    ws["A1"].font = Font(bold=True, size=12)
+    ws["A2"] = "Партия"
+    ws["B2"] = party
     if manager_kind == "primary":
-        _unmerge_if_present(ws, "A139:E139")
-        _unmerge_if_present(ws, "A273:C273")
-        ws["A5"] = "БЛОК 1. ПЕРВИЧНАЯ ДОКУМЕНТАЦИЯ (оплата по 20 ₽ за рабочее место)"
-        for i, rec in enumerate(primary[:130], 7):
-            vals = [rec.get("protocol"), rec.get("organization"), int(rec.get("workplaces") or 0),
-                    int(rec.get("workplaces") or 0) * 20]
-            for c, value in enumerate(vals, 1):
-                ws.cell(i, c).value = value
-        for row in range(7 + min(len(primary), 130), 137):
-            for col in range(1, 5):
-                ws.cell(row, col).value = None
-        ws["B137"] = "ИТОГО ПО ПЕРВИЧНОЙ ДОКУМЕНТАЦИИ:"
-        ws["C137"] = len(primary)
-        ws["D137"] = sum(int(r.get("workplaces") or 0) * 20 for r in primary)
-        ws.delete_rows(138, max(0, ws.max_row - 137))
+        ws["A3"] = "Первичная документация"
+        headers = ["№ протокола", "Название организации", "Кол-во рабочих мест",
+                   f"Сумма по ставке {rates['primary_rate']} ₽ за место"]
+        rows = [[r.get("protocol"), r.get("organization"), int(r.get("workplaces") or 0),
+                 int(r.get("workplaces") or 0) * rates["primary_rate"]]
+                for r in sorted(group, key=lambda r: str(r.get("protocol") or ""))]
+        total = ["ИТОГО", "", sum(row[2] for row in rows), sum(row[3] for row in rows)]
     else:
-        _unmerge_if_present(ws, "A5:E5")
-        _unmerge_if_present(ws, "A139:E139")
-        _unmerge_if_present(ws, "A273:C273")
-        ws["A139"] = "БЛОК 2. АДМИНИСТРАТИВНАЯ РАБОТА (оплата 100 ₽ за контору)"
-        for i, rec in enumerate(admin[:130], 141):
-            vals = [rec.get("protocol"), rec.get("organization"), _date(rec.get("admin_done_date")), 100]
-            for c, value in enumerate(vals, 1):
-                ws.cell(i, c).value = value
-        for row in range(141 + min(len(admin), 130), 271):
-            for col in range(1, 5):
-                ws.cell(row, col).value = None
-        ws["B271"] = "ИТОГО ПО АДМИН. РАБОТЕ:"
-        ws["C271"] = len(admin)
-        ws["D271"] = len(admin) * 100
-        ws.delete_rows(5, 134)
-        ws.merge_cells("A5:E5")
-        # The admin section now occupies the same compact layout as the primary report.
-        ws["A5"] = "БЛОК 2. АДМИНИСТРАТИВНАЯ РАБОТА (оплата 100 ₽ за контору)"
-        ws.delete_rows(138, max(0, ws.max_row - 137))
-    ws.print_area = "A1:D137"
+        ws["A3"] = "Административная работа"
+        headers = ["№ протокола", "Название организации", "Дата выполнения", "Сумма, ₽"]
+        admin_records = [r for r in group if r.get("admin_done_date")]
+        rows = [[r.get("protocol"), r.get("organization"), _date(r.get("admin_done_date")),
+                 _admin_amount(r, rates)]
+                for r in sorted(admin_records, key=lambda r: str(r.get("protocol") or ""))]
+        total = ["ИТОГО", "", len(rows), sum(row[3] for row in rows)]
+    _set_rows(ws, " ", headers, rows, total, start_row=5)
 
 
-def export_report(template_path: str | Path, output_path: str | Path, records, batches,
+def export_report(template_path: str | Path | None, output_path: str | Path, records, batches,
                   year: int = 2026, report_type: str = "all", party: str = "",
-                  manager_kind: str = "primary") -> Path:
-    """Populate the original workbook template with calculated values (never Excel formulas)."""
-    template_path, output_path = Path(template_path), Path(output_path)
-    if not template_path.exists():
-        raise FileNotFoundError(f"Не найден шаблон отчёта: {template_path}")
-    wb = load_workbook(template_path)
-    suffixes = ("Сводка по партиям", "Отчёт руководителю", "Годовой отчет")
-    source_sheets = {}
-    for suffix in suffixes:
-        found = next((name for name in wb.sheetnames if name.endswith(" " + suffix)), None)
-        if not found:
-            raise ValueError("В шаблоне не найдены все три листа отчётности.")
-        source_sheets[suffix] = found
+                  manager_kind: str = "primary", rates: dict | None = None) -> Path:
+    """Build a clean value-only workbook; no source-template objects, formulas or external links."""
+    output_path = Path(output_path)
+    rates = rates or {"primary_rate": 20, "primary_share_rate": 10, "admin_rate": 100}
     records = [dict(r) for r in records if int(r.get("year") or year) == int(year)]
     batches = [dict(b) for b in batches if int(b.get("year") or year) == int(year)]
-    sw = wb[source_sheets["Сводка по партиям"]]
-    yw = wb[source_sheets["Годовой отчет"]]
-    mw = wb[source_sheets["Отчёт руководителю"]]
-    _fill_summary(sw, records, batches, year)
-    _fill_yearly(yw, records, batches, year)
-    parties = sorted({_party(r) for r in records if _party(r)})
-    if not party and parties:
-        party = parties[0]
-    _fill_manager(mw, records, party, manager_kind)
-
-    # Replace year labels and table references. Report tabs are retained in preview workbook.
-    for suffix, old_name in source_sheets.items():
-        new_name = f"{year} {suffix}"
-        if old_name != new_name:
-            wb[old_name].title = new_name
-    if report_type != "all":
-        selected = {"summary": f"{year} Сводка по партиям",
-                    "annual": f"{year} Годовой отчет",
-                    "manager": f"{year} Отчёт руководителю"}.get(report_type)
-        if not selected or selected not in wb.sheetnames:
-            raise ValueError("Неизвестный тип отчёта.")
-        for name in list(wb.sheetnames):
-            if name != selected:
-                del wb[name]
-        # The manager template's party dropdown points to the summary sheet,
-        # which is intentionally absent from a standalone report file.
-        if report_type == "manager":
-            wb[selected].data_validations.dataValidation = []
-        wb.defined_names.clear()
-    try:
-        wb.calculation.fullCalcOnLoad = False
-        wb.calculation.forceFullCalc = False
-        wb.calculation.calcMode = "manual"
-    except AttributeError:
-        pass
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    if report_type in ("all", "summary"):
+        ws = workbook.create_sheet(f"{year} Сводка по партиям")
+        _build_summary(ws, records, batches, year, rates)
+    if report_type in ("all", "manager"):
+        parties = sorted({_party(r) for r in records if _party(r)}, key=str.casefold)
+        if not party and parties:
+            party = parties[0]
+        ws = workbook.create_sheet(f"{year} Отчёт руководителю")
+        _build_manager(ws, records, party, manager_kind, rates)
+    if report_type in ("all", "annual"):
+        ws = workbook.create_sheet(f"{year} Годовой отчет")
+        _build_annual(ws, records, batches, year, rates)
+    if not workbook.sheetnames:
+        raise ValueError("Неизвестный тип отчёта.")
+    for ws in workbook.worksheets:
+        ws.sheet_view.showGridLines = True
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, (date, datetime)):
+                    cell.number_format = "DD.MM.YYYY"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
+    workbook.save(output_path)
+    workbook.close()
     return output_path
