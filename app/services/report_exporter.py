@@ -202,6 +202,7 @@ def _fill_manager(ws, records, party, manager_kind):
     else:
         for row in range(141 + min(len(admin),130), 271):
             for col in range(1,5): ws.cell(row,col).value = None
+    ws["D273"] = None
 
 
 def export_report(template_path: str | Path, output_path: str | Path, records, batches,
