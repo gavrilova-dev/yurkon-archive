@@ -35,7 +35,9 @@ def _admin_amount(record, rates):
 
 
 def _set_rows(ws, title, headers, rows, total=None, start_row=3):
-    ws.cell(1, 1, title).font = Font(bold=True, size=12)
+    if title:
+        title_cell = ws.cell(start_row - 2, 1, title)
+        title_cell.font = Font(bold=True, size=12)
     header_row = start_row
     for col, value in enumerate(headers, 1):
         cell = ws.cell(header_row, col, value)
@@ -53,7 +55,9 @@ def _set_rows(ws, title, headers, rows, total=None, start_row=3):
     for col in range(1, len(headers) + 1):
         values = [str(ws.cell(row, col).value or "") for row in range(1, last_row + 1)]
         width = min(max(max((len(v) for v in values), default=10) + 2, 12), 42)
-        ws.column_dimensions[get_column_letter(col)].width = width
+        letter = get_column_letter(col)
+        current = ws.column_dimensions[letter].width or 0
+        ws.column_dimensions[letter].width = max(current, width)
     ws.freeze_panes = ws.cell(header_row + 1, 1).coordinate
     ws.sheet_view.showGridLines = True
     return last_row
@@ -82,8 +86,9 @@ def _build_summary(ws, records, batches, year, rates):
     for key in sorted(keys, key=lambda x: (x[0], x[1], month_order.get(x[2], 99))):
         group = groups.get(key, [])
         batch = batch_map.get(key, {})
+        display_executor = next((str(r.get("executor") or "") for r in group if r.get("executor")), key[1])
         rows.append([
-            f"{key[1].title()} - {key[2]}".strip(" -"),
+            f"{display_executor} - {key[2]}".strip(" -"),
             len(group),
             _date(batch.get("primary_given_date")),
             _date(batch.get("primary_returned_date")),
@@ -169,7 +174,6 @@ def _build_manager(ws, records, party, manager_kind, rates):
     ws["A2"] = "Партия"
     ws["B2"] = party
     if manager_kind == "primary":
-        ws["A3"] = "Первичная документация"
         headers = ["№ протокола", "Название организации", "Кол-во рабочих мест",
                    f"Сумма по ставке {rates['primary_rate']} ₽ за место"]
         rows = [[r.get("protocol"), r.get("organization"), int(r.get("workplaces") or 0),
@@ -177,14 +181,13 @@ def _build_manager(ws, records, party, manager_kind, rates):
                 for r in sorted(group, key=lambda r: str(r.get("protocol") or ""))]
         total = ["ИТОГО", "", sum(row[2] for row in rows), sum(row[3] for row in rows)]
     else:
-        ws["A3"] = "Административная работа"
         headers = ["№ протокола", "Название организации", "Дата выполнения", "Сумма, ₽"]
         admin_records = [r for r in group if r.get("admin_done_date")]
         rows = [[r.get("protocol"), r.get("organization"), _date(r.get("admin_done_date")),
                  _admin_amount(r, rates)]
                 for r in sorted(admin_records, key=lambda r: str(r.get("protocol") or ""))]
         total = ["ИТОГО", "", len(rows), sum(row[3] for row in rows)]
-    _set_rows(ws, " ", headers, rows, total, start_row=5)
+    _set_rows(ws, "Первичная документация" if manager_kind == "primary" else "Административная работа", headers, rows, total, start_row=5)
 
 
 def export_report(template_path: str | Path | None, output_path: str | Path, records, batches,
