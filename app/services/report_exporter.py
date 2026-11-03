@@ -112,7 +112,7 @@ def _fill_yearly(ws, records, batches, year):
         ws.cell(17, c).value = value
 
     executors = sorted({str(r.get("executor") or "") for r in records if r.get("executor")})
-    extra_executor_rows = max(0, len(executors) - 3)
+    extra_executor_rows = max(0, len(executors) - 2)
     if extra_executor_rows:
         ws.insert_rows(24, extra_executor_rows)
     for offset, executor in enumerate(executors):
