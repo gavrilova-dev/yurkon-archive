@@ -16,3 +16,7 @@ __pycache__/
 # Системные файлы
 Thumbs.db
 .DS_Store
+# Local database and backups
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
