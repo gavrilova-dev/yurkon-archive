@@ -176,3 +176,21 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(100 if row["admin_done_date"] else 0, 100)
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProtocolOcrParsingTests(unittest.TestCase):
+    def test_extracts_printed_protocol_numbers(self):
+        from app.services.protocol_ocr import extract_protocol_candidates
+
+        self.assertEqual(
+            extract_protocol_candidates("Протокол № 7609/2024, второй: 81-2025"),
+            ["7609/2024", "81/2025"],
+        )
+
+    def test_ignores_numbers_without_four_digit_year_and_duplicates(self):
+        from app.services.protocol_ocr import extract_protocol_candidates
+
+        self.assertEqual(
+            extract_protocol_candidates("№ 123/24; 123/24; 4567/2026"),
+            ["4567/2026"],
+        )
