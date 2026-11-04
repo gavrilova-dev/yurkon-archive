@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 PROTOCOL_PATTERN = re.compile(r"(?<!\d)(\d{1,6})\s*([-/])\s*(\d{4})(?!\d)")
+PROTOCOL_LABEL_PATTERN = re.compile(r"(?:№|N[oо]?\.?)\s*протокол(?:а)?", re.IGNORECASE)
 
 
 def normalize_protocol(value: str) -> str:
@@ -15,14 +16,21 @@ def normalize_protocol(value: str) -> str:
 
 def extract_protocol_candidates(text: str) -> list[str]:
     """Return printed protocol-like number candidates in their order of appearance."""
+    source = text or ""
     candidates = []
     seen = set()
-    for match in PROTOCOL_PATTERN.finditer(text or ""):
-        value = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-        normalized = normalize_protocol(value)
-        if normalized not in seen:
-            seen.add(normalized)
-            candidates.append(value)
+
+    # Ignore dates and identifiers elsewhere on the page. Accept a number
+    # only when it follows the explicit "№ протокола" label.
+    for label in PROTOCOL_LABEL_PATTERN.finditer(source):
+        nearby_text = source[label.end():label.end() + 160]
+        match = PROTOCOL_PATTERN.search(nearby_text)
+        if match:
+            value = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            normalized = normalize_protocol(value)
+            if normalized not in seen:
+                seen.add(normalized)
+                candidates.append(value)
     return candidates
 
 
