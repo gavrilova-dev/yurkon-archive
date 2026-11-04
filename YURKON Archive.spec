@@ -7,7 +7,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=Tree('build/tesseract', prefix='tesseract'),
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -16,6 +16,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+a.datas += Tree('build/tesseract', prefix='tesseract')
 pyz = PYZ(a.pure)
 
 exe = EXE(
