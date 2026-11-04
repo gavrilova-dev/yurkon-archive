@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 
-PROTOCOL_PATTERN = re.compile(r"(?<!\\d)(\\d{1,6})\\s*[/\\-]\\s*(20\\d{2})(?!\\d)")
+PROTOCOL_PATTERN = re.compile(r"(?<!\d)(\d{1,6})\s*[-/]\s*(20\d{2})(?!\d)")
 
 
 def normalize_protocol(value: str) -> str:
-    return re.sub(r"\\s+", "", str(value or "")).replace("ё", "е").casefold()
+    return re.sub(r"\s+", "", str(value or "")).replace("ё", "е").casefold()
 
 
 def extract_protocol_candidates(text: str) -> list[str]:
@@ -48,21 +48,19 @@ def recognize_protocol_candidates(pdf_path: str | Path) -> list[str]:
         if not document:
             return []
         page = document.load_page(0)
-        text = page.get_text("text")
-        candidates = extract_protocol_candidates(text)
+        candidates = extract_protocol_candidates(page.get_text("text"))
         if candidates:
             return candidates
 
         executable, tessdata = _tesseract_paths()
         pixmap = page.get_pixmap(matrix=fitz.Matrix(3, 3), colorspace=fitz.csGRAY, alpha=False)
-        image_bytes = pixmap.tobytes("png")
         result = subprocess.run(
             [
                 str(executable), "stdin", "stdout",
                 "--tessdata-dir", str(tessdata),
                 "-l", "rus+eng", "--oem", "1", "--psm", "6",
             ],
-            input=image_bytes,
+            input=pixmap.tobytes("png"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=45,
