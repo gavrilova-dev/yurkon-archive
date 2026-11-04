@@ -59,12 +59,12 @@ class RateSnapshotTests(unittest.TestCase):
             finally:
                 db.close()
 
-    def test_mark_scanned_returns_true_and_saves_status_for_matching_record(self):
+    def test_mark_scanned_matches_protocol_even_when_organization_differs(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "archive.sqlite3")
             try:
                 rid = db.add_record({"executor":"Тест","month":"ноябрь","year":2026,
-                    "protocol":"55/2026","organization":"ООО Проверка","workplaces":1})
+                    "protocol":"55/2026","organization":"ООО «Проверка»","workplaces":1})
                 result = db.mark_scanned("55/2026", "ООО Проверка",
                                          "ready/55-2026.pdf", "2026-11-03")
                 self.assertTrue(result)
