@@ -1199,7 +1199,9 @@ class MainWindow(QMainWindow):
                     pixmap_data.stride,
                     QImage.Format.Format_RGB888,
                 ).copy()
-                self.preview_image.setPixmap(QPixmap.fromImage(image))
+                preview_pixmap = QPixmap.fromImage(image)
+                self.preview_image.setPixmap(preview_pixmap)
+                self.preview_image.resize(preview_pixmap.size())
             self.preview_page_label.setText(
                 f"Страница {self.preview_page_index + 1} из {self.preview_page_count}"
             )
