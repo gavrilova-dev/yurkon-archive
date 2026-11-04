@@ -1089,6 +1089,7 @@ class MainWindow(QMainWindow):
             if self.current_pdf is None:
                 self.current_pdf = files[0]
         self._update_scan_button()
+        self.render_pdf_preview()
 
     def select_pdf(self, current, _previous=None):
         if current:
