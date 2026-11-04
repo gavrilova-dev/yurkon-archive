@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-PROTOCOL_PATTERN = re.compile(r"(?<!\d)(\d{1,6})\s*[-/]\s*(20\d{2})(?!\d)")
+PROTOCOL_PATTERN = re.compile(r"(?<!\d)(\d{1,6})\s*([-/])\s*(\d{4})(?!\d)")
 
 
 def normalize_protocol(value: str) -> str:
@@ -18,7 +18,7 @@ def extract_protocol_candidates(text: str) -> list[str]:
     candidates = []
     seen = set()
     for match in PROTOCOL_PATTERN.finditer(text or ""):
-        value = f"{match.group(1)}/{match.group(2)}"
+        value = f"{match.group(1)}{match.group(2)}{match.group(3)}"
         normalized = normalize_protocol(value)
         if normalized not in seen:
             seen.add(normalized)
