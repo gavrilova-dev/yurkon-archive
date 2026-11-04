@@ -536,6 +536,23 @@ class ReportPreviewDialog(QDialog):
         super().closeEvent(event)
 
 
+class PdfPreviewScrollArea(QScrollArea):
+    wheel_scrolled = Signal(int)
+    resized = Signal()
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta:
+            self.wheel_scrolled.emit(1 if delta > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
 class MainWindow(QMainWindow):
     scan_files_changed = Signal()
     COLUMNS = [
@@ -557,6 +574,7 @@ class MainWindow(QMainWindow):
         self.current_archive_record = None
         self.preview_page_index = 0
         self.preview_page_count = 0
+        self.preview_zoom = 1.0
         self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
@@ -673,16 +691,37 @@ class MainWindow(QMainWindow):
         self.preview_page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_next_button = QPushButton("Следующая →")
         self.preview_next_button.clicked.connect(self.show_next_preview_page)
+        self.preview_zoom_out_button = QPushButton("−")
+        self.preview_zoom_out_button.setToolTip("Уменьшить масштаб")
+        self.preview_zoom_out_button.clicked.connect(lambda: self.zoom_preview(1 / 1.25))
+        self.preview_zoom_label = QLabel("Вписать")
+        self.preview_zoom_label.setMinimumWidth(52)
+        self.preview_zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_zoom_in_button = QPushButton("+")
+        self.preview_zoom_in_button.setToolTip("Увеличить масштаб")
+        self.preview_zoom_in_button.clicked.connect(lambda: self.zoom_preview(1.25))
+        self.preview_fit_button = QPushButton("Вписать")
+        self.preview_fit_button.setToolTip("Показать страницу целиком")
+        self.preview_fit_button.clicked.connect(self.fit_preview)
         preview_toolbar.addWidget(self.preview_prev_button)
         preview_toolbar.addStretch()
         preview_toolbar.addWidget(self.preview_page_label)
         preview_toolbar.addStretch()
+        preview_toolbar.addWidget(self.preview_zoom_out_button)
+        preview_toolbar.addWidget(self.preview_zoom_label)
+        preview_toolbar.addWidget(self.preview_zoom_in_button)
+        preview_toolbar.addWidget(self.preview_fit_button)
         preview_toolbar.addWidget(self.preview_next_button)
         preview_layout.addLayout(preview_toolbar)
 
-        self.preview_scroll = QScrollArea()
-        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll = PdfPreviewScrollArea()
+        self.preview_scroll.setWidgetResizable(False)
         self.preview_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_scroll.wheel_scrolled.connect(
+            lambda direction: self.show_previous_preview_page()
+            if direction > 0 else self.show_next_preview_page()
+        )
+        self.preview_scroll.resized.connect(self._fit_preview_on_resize)
         self.preview_image = QLabel("Выберите PDF для просмотра")
         self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_image.setMinimumSize(1, 1)
@@ -1109,6 +1148,21 @@ class MainWindow(QMainWindow):
         self.preview_page_label.setText("Страница —")
         self.preview_prev_button.setEnabled(False)
         self.preview_next_button.setEnabled(False)
+        self.preview_zoom_label.setText("Вписать")
+        self.preview_zoom_out_button.setEnabled(False)
+        self.preview_zoom_in_button.setEnabled(False)
+
+    def _fit_preview_on_resize(self):
+        if self.current_pdf:
+            self.render_pdf_preview()
+
+    def zoom_preview(self, factor):
+        self.preview_zoom = max(0.25, min(4.0, self.preview_zoom * factor))
+        self.render_pdf_preview()
+
+    def fit_preview(self):
+        self.preview_zoom = 1.0
+        self.render_pdf_preview()
 
     def render_pdf_preview(self):
         if not self.current_pdf:
@@ -1127,8 +1181,14 @@ class MainWindow(QMainWindow):
                     0, min(self.preview_page_index, self.preview_page_count - 1)
                 )
                 pdf_page = document.load_page(self.preview_page_index)
-                available_width = max(300, self.preview_scroll.viewport().width() - 30)
-                scale = min(1.5, available_width / max(1, pdf_page.rect.width))
+                viewport = self.preview_scroll.viewport().size()
+                available_width = max(1, viewport.width() - 24)
+                available_height = max(1, viewport.height() - 24)
+                fit_scale = min(
+                    available_width / max(1, pdf_page.rect.width),
+                    available_height / max(1, pdf_page.rect.height),
+                )
+                scale = max(0.1, min(4.0, fit_scale * self.preview_zoom))
                 pixmap_data = pdf_page.get_pixmap(
                     matrix=fitz.Matrix(scale, scale), alpha=False
                 )
@@ -1143,6 +1203,9 @@ class MainWindow(QMainWindow):
             self.preview_page_label.setText(
                 f"Страница {self.preview_page_index + 1} из {self.preview_page_count}"
             )
+            self.preview_zoom_label.setText(f"{round(self.preview_zoom * 100)}%")
+            self.preview_zoom_out_button.setEnabled(self.preview_zoom > 0.25)
+            self.preview_zoom_in_button.setEnabled(self.preview_zoom < 4.0)
             self.preview_prev_button.setEnabled(self.preview_page_index > 0)
             self.preview_next_button.setEnabled(
                 self.preview_page_index < self.preview_page_count - 1
