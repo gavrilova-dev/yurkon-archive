@@ -1,11 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import Tree
+
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=Tree('build/tesseract', prefix='tesseract'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
