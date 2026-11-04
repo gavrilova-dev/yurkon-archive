@@ -338,9 +338,16 @@ class Database:
         if record_id is None:
             return False
 
+        stamp = self._date(scanned_date)
         self.connection.execute(
-            "UPDATE primary_records SET scanned_date=?,admin_done_date=COALESCE(admin_done_date,?),pdf_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (self._date(scanned_date), self._date(scanned_date), pdf_path, record_id),
+            """UPDATE primary_records
+               SET scanned_date=?,
+                   assembled_date=COALESCE(assembled_date,?),
+                   admin_done_date=COALESCE(admin_done_date,?),
+                   pdf_path=?,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (stamp, stamp, stamp, pdf_path, record_id),
         )
         self.connection.commit()
         return True
@@ -434,9 +441,14 @@ class Database:
             if field == "scanned_date":
                 self.connection.execute("""
                     UPDATE primary_records
-                    SET scanned_date=?, admin_done_date=?, updated_at=CURRENT_TIMESTAMP
+                    SET scanned_date=?,
+                        assembled_date=CASE
+                            WHEN ? IS NOT NULL THEN COALESCE(assembled_date, ?)
+                            ELSE assembled_date
+                        END,
+                        admin_done_date=?, updated_at=CURRENT_TIMESTAMP
                     WHERE id=?
-                """, (stamp, stamp, record_id))
+                """, (stamp, stamp, stamp, stamp, record_id))
             else:
                 self.connection.execute(
                     f"UPDATE primary_records SET {field}=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
