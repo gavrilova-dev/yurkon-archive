@@ -7,30 +7,38 @@ from pathlib import Path
 
 
 PROTOCOL_PATTERN = re.compile(r"(?<!\d)(\d{1,6})\s*([-/])\s*(\d{4})(?!\d)")
-PROTOCOL_LABEL_PATTERN = re.compile(r"(?:№|N[oо]?\.?)\s*протокол(?:а)?", re.IGNORECASE)
+PROTOCOL_LABEL_PATTERN = re.compile(
+    r"(?:№|N[oо]?\.?)\s*протокол(?:а)?|протокол(?:а)?\s*(?:№|N[oо]?\.?)",
+    re.IGNORECASE,
+)
 
 
 def normalize_protocol(value: str) -> str:
     return re.sub(r"\s+", "", str(value or "")).replace("ё", "е").casefold()
 
 
-def extract_protocol_candidates(text: str) -> list[str]:
-    """Return printed protocol-like number candidates in their order of appearance."""
+def extract_protocol_candidates(text: str, require_label: bool = False) -> list[str]:
+    """Extract protocol-shaped numbers; optionally require a nearby protocol label."""
     source = text or ""
+    if require_label:
+        matches = []
+        # Real PDFs must associate the number with an explicit protocol label.
+        for label in PROTOCOL_LABEL_PATTERN.finditer(source):
+            match = PROTOCOL_PATTERN.search(source[label.end():label.end() + 160])
+            if match:
+                matches.append(match)
+    else:
+        # General format parser, used independently of document context.
+        matches = list(PROTOCOL_PATTERN.finditer(source))
+
     candidates = []
     seen = set()
-
-    # Ignore dates and identifiers elsewhere on the page. Accept a number
-    # only when it follows the explicit "№ протокола" label.
-    for label in PROTOCOL_LABEL_PATTERN.finditer(source):
-        nearby_text = source[label.end():label.end() + 160]
-        match = PROTOCOL_PATTERN.search(nearby_text)
-        if match:
-            value = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-            normalized = normalize_protocol(value)
-            if normalized not in seen:
-                seen.add(normalized)
-                candidates.append(value)
+    for match in matches:
+        value = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+        normalized = normalize_protocol(value)
+        if normalized not in seen:
+            seen.add(normalized)
+            candidates.append(value)
     return candidates
 
 
@@ -56,7 +64,7 @@ def recognize_protocol_candidates(pdf_path: str | Path) -> list[str]:
         if not document:
             return []
         page = document.load_page(0)
-        candidates = extract_protocol_candidates(page.get_text("text"))
+        candidates = extract_protocol_candidates(page.get_text("text"), require_label=True)
         if candidates:
             return candidates
 
@@ -77,4 +85,4 @@ def recognize_protocol_candidates(pdf_path: str | Path) -> list[str]:
         if result.returncode != 0:
             message = result.stderr.decode("utf-8", errors="replace").strip()
             raise RuntimeError(message or "Tesseract не смог распознать страницу.")
-        return extract_protocol_candidates(result.stdout.decode("utf-8", errors="replace"))
+        return extract_protocol_candidates(result.stdout.decode("utf-8", errors="replace"), require_label=True)
