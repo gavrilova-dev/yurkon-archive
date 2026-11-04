@@ -322,15 +322,17 @@ class Database:
         return records
 
     def mark_scanned(self, protocol: str, organization: str, pdf_path: str, scanned_date: str) -> bool:
-        protocol_norm = self._norm(protocol).replace(" ", "")
-        organization_norm = self._norm(organization)
+        # Organization is kept in the signature for compatibility with the scanning workflow,
+        # but the protocol number is the only matching criterion.
+        protocol_norm = self._norm(protocol).replace(" ", "").replace("ё", "е")
+        if not protocol_norm:
+            return False
         matches = self.connection.execute(
-            "SELECT id,protocol,organization FROM primary_records ORDER BY id DESC"
+            "SELECT id,protocol FROM primary_records ORDER BY id DESC"
         ).fetchall()
         record_id = next(
             (row["id"] for row in matches
-             if self._norm(row["protocol"]).replace(" ", "") == protocol_norm
-             and self._norm(row["organization"]) == organization_norm),
+             if self._norm(row["protocol"]).replace(" ", "").replace("ё", "е") == protocol_norm),
             None,
         )
         if record_id is None:
