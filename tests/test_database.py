@@ -33,7 +33,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["archive_index"], "ИЛ-10-0001/2026")
         self.db.mark_scanned("1234/2026", "ооо альфа", "C:/ready/test.pdf", "2026-11-02")
-        self.assertEqual(self.db.list_records()[0]["scanned_date"], "2026-11-02")
+        record = self.db.list_records()[0]
+        self.assertEqual(record["scanned_date"], "2026-11-02")
+        self.assertEqual(record["assembled_date"], "2026-11-02")
 
     def test_archive_index_matches_when_organization_punctuation_differs(self):
         self.db.add_record({
@@ -94,7 +96,12 @@ class DatabaseTests(unittest.TestCase):
         self.db.update_status(record_id, "scanned_date", "2026-11-02")
         record = self.db.get_record(record_id)
         self.assertEqual(record["scanned_date"], "2026-11-02")
+        self.assertEqual(record["assembled_date"], "2026-11-02")
         self.assertEqual(record["admin_done_date"], "2026-11-02")
+        self.db.update_status(record_id, "scanned_date", None)
+        record = self.db.get_record(record_id)
+        self.assertIsNone(record["scanned_date"])
+        self.assertEqual(record["assembled_date"], "2026-11-02")
 
     def test_archive_index_lookup_uses_protocol_not_organization_name(self):
         self.db.add_record({
@@ -169,3 +176,21 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(100 if row["admin_done_date"] else 0, 100)
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProtocolOcrParsingTests(unittest.TestCase):
+    def test_extracts_printed_protocol_numbers(self):
+        from app.services.protocol_ocr import extract_protocol_candidates
+
+        self.assertEqual(
+            extract_protocol_candidates("Протокол № 7609/2024, второй: 81-2025"),
+            ["7609/2024", "81-2025"],
+        )
+
+    def test_ignores_numbers_without_four_digit_year_and_duplicates(self):
+        from app.services.protocol_ocr import extract_protocol_candidates
+
+        self.assertEqual(
+            extract_protocol_candidates("№ 123/24; 123/24; 4567/2026"),
+            ["4567/2026"],
+        )

@@ -6,13 +6,13 @@ import tempfile
 from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
-from PySide6.QtGui import QIntValidator
+from PySide6.QtGui import QIntValidator, QImage, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
-    QGroupBox, QHeaderView, QAbstractItemView,
+    QGroupBox, QHeaderView, QAbstractItemView, QScrollArea,
 )
 
 from app.config import APP_DATA, DATABASE_PATH, INCOMING_FOLDER, READY_FOLDER, ARCHIVE_JOURNAL_DEFAULT
@@ -20,6 +20,7 @@ from app.database import Database
 from app.file_manager import FileManager
 from app.services.file_watcher import FileWatcher
 from app.services.archive_importer import read_archive_journal
+from app.services.protocol_ocr import normalize_protocol, recognize_protocol_candidates
 from app.services.report_exporter import export_report
 
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -536,6 +537,23 @@ class ReportPreviewDialog(QDialog):
         super().closeEvent(event)
 
 
+class PdfPreviewScrollArea(QScrollArea):
+    wheel_scrolled = Signal(int)
+    resized = Signal()
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta:
+            self.wheel_scrolled.emit(1 if delta > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
 class MainWindow(QMainWindow):
     scan_files_changed = Signal()
     COLUMNS = [
@@ -555,6 +573,12 @@ class MainWindow(QMainWindow):
         self.file_manager = FileManager(INCOMING_FOLDER, READY_FOLDER)
         self.current_pdf = None
         self.current_archive_record = None
+        self.preview_page_index = 0
+        self.preview_page_count = 0
+        self.preview_zoom = 1.0
+        self.ocr_pdf_path = None
+        self.ocr_retry_path = None
+        self.ocr_retry_count = 0
         self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
@@ -654,14 +678,64 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        group = QGroupBox("Новые PDF в папке сканера")
-        group_layout = QVBoxLayout(group)
+        files_group = QGroupBox("Новые PDF в папке сканера")
+        files_layout = QVBoxLayout(files_group)
         self.scan_file_label = QLabel("Новых PDF нет")
         self.scan_queue = QListWidget()
         self.scan_queue.currentItemChanged.connect(self.select_pdf)
-        group_layout.addWidget(self.scan_file_label)
-        group_layout.addWidget(self.scan_queue)
-        layout.addWidget(group)
+        files_layout.addWidget(self.scan_file_label)
+        files_layout.addWidget(self.scan_queue)
+
+        preview_group = QGroupBox("Предпросмотр PDF")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_toolbar = QHBoxLayout()
+        self.preview_prev_button = QPushButton("← Предыдущая")
+        self.preview_prev_button.clicked.connect(self.show_previous_preview_page)
+        self.preview_page_label = QLabel("Страница —")
+        self.preview_page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_next_button = QPushButton("Следующая →")
+        self.preview_next_button.clicked.connect(self.show_next_preview_page)
+        self.preview_zoom_out_button = QPushButton("−")
+        self.preview_zoom_out_button.setToolTip("Уменьшить масштаб")
+        self.preview_zoom_out_button.clicked.connect(lambda: self.zoom_preview(1 / 1.25))
+        self.preview_zoom_label = QLabel("Вписать")
+        self.preview_zoom_label.setMinimumWidth(52)
+        self.preview_zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_zoom_in_button = QPushButton("+")
+        self.preview_zoom_in_button.setToolTip("Увеличить масштаб")
+        self.preview_zoom_in_button.clicked.connect(lambda: self.zoom_preview(1.25))
+        self.preview_fit_button = QPushButton("Вписать")
+        self.preview_fit_button.setToolTip("Показать страницу целиком")
+        self.preview_fit_button.clicked.connect(self.fit_preview)
+        preview_toolbar.addWidget(self.preview_prev_button)
+        preview_toolbar.addStretch()
+        preview_toolbar.addWidget(self.preview_page_label)
+        preview_toolbar.addStretch()
+        preview_toolbar.addWidget(self.preview_zoom_out_button)
+        preview_toolbar.addWidget(self.preview_zoom_label)
+        preview_toolbar.addWidget(self.preview_zoom_in_button)
+        preview_toolbar.addWidget(self.preview_fit_button)
+        preview_toolbar.addWidget(self.preview_next_button)
+        preview_layout.addLayout(preview_toolbar)
+
+        self.preview_scroll = PdfPreviewScrollArea()
+        self.preview_scroll.setWidgetResizable(False)
+        self.preview_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_scroll.wheel_scrolled.connect(
+            lambda direction: self.show_previous_preview_page()
+            if direction > 0 else self.show_next_preview_page()
+        )
+        self.preview_scroll.resized.connect(self._fit_preview_on_resize)
+        self.preview_image = QLabel("Выберите PDF для просмотра")
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image.setMinimumSize(1, 1)
+        self.preview_scroll.setWidget(self.preview_image)
+        preview_layout.addWidget(self.preview_scroll)
+
+        scan_content = QHBoxLayout()
+        scan_content.addWidget(files_group, 1)
+        scan_content.addWidget(preview_group, 3)
+        layout.addLayout(scan_content, 3)
 
         search_group = QGroupBox("Поиск организации по номеру протокола")
         search_layout = QVBoxLayout(search_group)
@@ -674,6 +748,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.scan_protocol)
         row.addWidget(find)
         search_layout.addLayout(row)
+        self.ocr_status = QLabel("Номер протокола будет распознан автоматически при выборе PDF.")
+        self.ocr_status.setWordWrap(True)
+        search_layout.addWidget(self.ocr_status)
 
         self.archive_results = QListWidget()
         self.archive_results.currentItemChanged.connect(self.select_archive_record)
@@ -685,7 +762,7 @@ class MainWindow(QMainWindow):
         self.rename_button.clicked.connect(self.move_scanned_pdf)
         self.rename_button.setEnabled(False)
         search_layout.addWidget(self.rename_button)
-        layout.addWidget(search_group)
+        layout.addWidget(search_group, 1)
         return page
 
     def _build_settings_tab(self):
@@ -907,6 +984,12 @@ class MainWindow(QMainWindow):
         try:
             self.db.update_status(int(record_id), field, stamp)
             row = item.row()
+            if item.column() == 12 and stamp:
+                assembled_item = self.table.item(row, 11)
+                if assembled_item and assembled_item.checkState() != Qt.CheckState.Checked:
+                    self.table.blockSignals(True)
+                    assembled_item.setCheckState(Qt.CheckState.Checked)
+                    self.table.blockSignals(False)
             if item.column() == 12:
                 admin_item = self.table.item(row, 9)
                 old_amount = int(admin_item.text() or 0) if admin_item else 0
@@ -1058,25 +1141,204 @@ class MainWindow(QMainWindow):
             if self.current_pdf is None:
                 self.current_pdf = files[0]
         self._update_scan_button()
+        self.render_pdf_preview()
+        if self.current_pdf and str(self.current_pdf) != self.ocr_pdf_path:
+            self._recognize_current_pdf()
+        elif not self.current_pdf:
+            self.ocr_pdf_path = None
 
     def select_pdf(self, current, _previous=None):
         if current:
             self.current_pdf = Path(current.data(Qt.ItemDataRole.UserRole))
+            self.preview_page_index = 0
+            self.render_pdf_preview()
+            self._recognize_current_pdf()
+        else:
+            self.current_pdf = None
+            self.clear_pdf_preview()
         self._update_scan_button()
 
-    def search_archive(self):
+    def clear_pdf_preview(self):
+        self.preview_page_count = 0
+        self.preview_page_index = 0
+        self.preview_image.clear()
+        self.preview_image.setText("Выберите PDF для просмотра")
+        self.preview_page_label.setText("Страница —")
+        self.preview_prev_button.setEnabled(False)
+        self.preview_next_button.setEnabled(False)
+        self.preview_zoom_label.setText("Вписать")
+        self.preview_zoom_out_button.setEnabled(False)
+        self.preview_zoom_in_button.setEnabled(False)
+
+    def _fit_preview_on_resize(self):
+        if self.current_pdf:
+            self.render_pdf_preview()
+
+    def zoom_preview(self, factor):
+        self.preview_zoom = max(0.25, min(4.0, self.preview_zoom * factor))
+        self.render_pdf_preview()
+
+    def fit_preview(self):
+        self.preview_zoom = 1.0
+        self.render_pdf_preview()
+
+    def render_pdf_preview(self):
+        if not self.current_pdf:
+            self.clear_pdf_preview()
+            return
+        try:
+            import fitz
+
+            with fitz.open(str(self.current_pdf)) as document:
+                self.preview_page_count = len(document)
+                if self.preview_page_count == 0:
+                    self.clear_pdf_preview()
+                    self.preview_image.setText("В PDF нет страниц")
+                    return
+                self.preview_page_index = max(
+                    0, min(self.preview_page_index, self.preview_page_count - 1)
+                )
+                pdf_page = document.load_page(self.preview_page_index)
+                viewport = self.preview_scroll.viewport().size()
+                available_width = max(1, viewport.width() - 24)
+                available_height = max(1, viewport.height() - 24)
+                fit_scale = min(
+                    available_width / max(1, pdf_page.rect.width),
+                    available_height / max(1, pdf_page.rect.height),
+                )
+                scale = max(0.1, min(4.0, fit_scale * self.preview_zoom))
+                pixmap_data = pdf_page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale), alpha=False
+                )
+                image = QImage(
+                    pixmap_data.samples,
+                    pixmap_data.width,
+                    pixmap_data.height,
+                    pixmap_data.stride,
+                    QImage.Format.Format_RGB888,
+                ).copy()
+                preview_pixmap = QPixmap.fromImage(image)
+                self.preview_image.setPixmap(preview_pixmap)
+                self.preview_image.resize(preview_pixmap.size())
+            self.preview_page_label.setText(
+                f"Страница {self.preview_page_index + 1} из {self.preview_page_count}"
+            )
+            self.preview_zoom_label.setText(f"{round(self.preview_zoom * 100)}%")
+            self.preview_zoom_out_button.setEnabled(self.preview_zoom > 0.25)
+            self.preview_zoom_in_button.setEnabled(self.preview_zoom < 4.0)
+            self.preview_prev_button.setEnabled(self.preview_page_index > 0)
+            self.preview_next_button.setEnabled(
+                self.preview_page_index < self.preview_page_count - 1
+            )
+        except Exception as exc:
+            self.preview_page_count = 0
+            self.preview_page_label.setText("Не удалось открыть PDF")
+            self.preview_image.setPixmap(QPixmap())
+            self.preview_image.setText(f"Ошибка предпросмотра:\n{exc}")
+            self.preview_prev_button.setEnabled(False)
+            self.preview_next_button.setEnabled(False)
+
+    def show_previous_preview_page(self):
+        if self.preview_page_index > 0:
+            self.preview_page_index -= 1
+            self.render_pdf_preview()
+
+    def show_next_preview_page(self):
+        if self.preview_page_index < self.preview_page_count - 1:
+            self.preview_page_index += 1
+            self.render_pdf_preview()
+
+    def _recognize_current_pdf(self):
+        if not self.current_pdf:
+            return
+        self.ocr_pdf_path = str(self.current_pdf)
+        self.current_archive_record = None
+        self.archive_results.clear()
+        self.archive_detail.setText("Проверяем распознанный номер.")
+        self.ocr_status.setText("Распознаём номер протокола на первой странице…")
+        self._update_scan_button()
+        try:
+            candidates = recognize_protocol_candidates(self.current_pdf)
+            if not candidates:
+                self.ocr_status.setText(
+                    "Не удалось распознать номер протокола. Введите его вручную и нажмите «Найти»."
+                )
+                return
+
+            self.scan_protocol.setText(candidates[0])
+            for candidate in candidates:
+                matches = self.db.find_archive(candidate)
+                exact_matches = [
+                    row for row in matches
+                    if normalize_protocol(row["protocol"]) == normalize_protocol(candidate)
+                ]
+                if exact_matches:
+                    self.scan_protocol.setText(candidate)
+                    self.search_archive(quiet=True, exact_only=True)
+                    self.ocr_status.setText(
+                        f"Распознан номер {candidate}. Проверьте найденную организацию перед переименованием."
+                    )
+                    return
+
+            self.ocr_status.setText(
+                f"Распознан номер {candidates[0]}, но точная запись в архивном журнале не найдена. "
+                "Проверьте номер или выполните поиск вручную."
+            )
+        except Exception as exc:
+            pdf_path = str(self.current_pdf) if self.current_pdf else None
+            self.ocr_pdf_path = None
+            self.ocr_status.setText(
+                f"Файл пока не готов для распознавания: {exc}. Повторяем попытку…"
+            )
+            if pdf_path:
+                if self.ocr_retry_path != pdf_path:
+                    self.ocr_retry_path = pdf_path
+                    self.ocr_retry_count = 0
+                if self.ocr_retry_count < 5:
+                    self.ocr_retry_count += 1
+                    QTimer.singleShot(
+                        1000,
+                        lambda path=pdf_path: self._retry_ocr_when_ready(path),
+                    )
+                else:
+                    self.ocr_status.setText(
+                        f"Не удалось прочитать PDF: {exc}. "
+                        "Проверьте файл или выберите его повторно."
+                    )
+        else:
+            self.ocr_retry_path = None
+            self.ocr_retry_count = 0
+        finally:
+            self._update_scan_button()
+
+    def _retry_ocr_when_ready(self, pdf_path):
+        if (
+            self.current_pdf
+            and str(self.current_pdf) == pdf_path
+            and self.ocr_pdf_path != pdf_path
+        ):
+            self._recognize_current_pdf()
+
+    def search_archive(self, quiet=False, exact_only=False):
         protocol = self.scan_protocol.text().strip()
         self.archive_results.clear()
         self.current_archive_record = None
         if not protocol:
-            QMessageBox.warning(self, "Введите номер", "Укажите номер протокола для поиска.")
+            if not quiet:
+                QMessageBox.warning(self, "Введите номер", "Укажите номер протокола для поиска.")
             return
         matches = self.db.find_archive(protocol)
+        if exact_only:
+            matches = [
+                row for row in matches
+                if normalize_protocol(row["protocol"]) == normalize_protocol(protocol)
+            ]
         if not matches:
-            QMessageBox.information(
-                self, "Не найдено",
-                "Совпадений нет. Проверьте, что импортирована актуальная версия архивного журнала."
-            )
+            if not quiet:
+                QMessageBox.information(
+                    self, "Не найдено",
+                    "Совпадений нет. Проверьте, что импортирована актуальная версия архивного журнала."
+                )
             self.archive_detail.setText("Совпадений нет.")
             self._update_scan_button()
             return

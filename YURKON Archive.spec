@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -14,6 +16,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+a.datas += Tree('build/tesseract', prefix='tesseract')
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -35,5 +38,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon='icon.ico',
 )
