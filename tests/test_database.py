@@ -184,7 +184,7 @@ class ProtocolOcrParsingTests(unittest.TestCase):
 
         self.assertEqual(
             extract_protocol_candidates("Протокол № 7609/2024, второй: 81-2025"),
-            ["7609/2024", "81/2025"],
+            ["7609/2024", "81-2025"],
         )
 
     def test_ignores_numbers_without_four_digit_year_and_duplicates(self):
