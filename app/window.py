@@ -20,6 +20,7 @@ from app.database import Database
 from app.file_manager import FileManager
 from app.services.file_watcher import FileWatcher
 from app.services.archive_importer import read_archive_journal
+from app.services.protocol_ocr import normalize_protocol, recognize_protocol_candidates
 from app.services.report_exporter import export_report
 
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -575,6 +576,7 @@ class MainWindow(QMainWindow):
         self.preview_page_index = 0
         self.preview_page_count = 0
         self.preview_zoom = 1.0
+        self.ocr_pdf_path = None
         self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
@@ -744,6 +746,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.scan_protocol)
         row.addWidget(find)
         search_layout.addLayout(row)
+        self.ocr_status = QLabel("Номер протокола будет распознан автоматически при выборе PDF.")
+        self.ocr_status.setWordWrap(True)
+        search_layout.addWidget(self.ocr_status)
 
         self.archive_results = QListWidget()
         self.archive_results.currentItemChanged.connect(self.select_archive_record)
@@ -1135,12 +1140,17 @@ class MainWindow(QMainWindow):
                 self.current_pdf = files[0]
         self._update_scan_button()
         self.render_pdf_preview()
+        if self.current_pdf and str(self.current_pdf) != self.ocr_pdf_path:
+            self._recognize_current_pdf()
+        elif not self.current_pdf:
+            self.ocr_pdf_path = None
 
     def select_pdf(self, current, _previous=None):
         if current:
             self.current_pdf = Path(current.data(Qt.ItemDataRole.UserRole))
             self.preview_page_index = 0
             self.render_pdf_preview()
+            self._recognize_current_pdf()
         else:
             self.current_pdf = None
             self.clear_pdf_preview()
@@ -1236,19 +1246,69 @@ class MainWindow(QMainWindow):
             self.preview_page_index += 1
             self.render_pdf_preview()
 
-    def search_archive(self):
+    def _recognize_current_pdf(self):
+        if not self.current_pdf:
+            return
+        self.ocr_pdf_path = str(self.current_pdf)
+        self.current_archive_record = None
+        self.archive_results.clear()
+        self.archive_detail.setText("Проверяем распознанный номер.")
+        self.ocr_status.setText("Распознаём номер протокола на первой странице…")
+        self._update_scan_button()
+        try:
+            candidates = recognize_protocol_candidates(self.current_pdf)
+            if not candidates:
+                self.ocr_status.setText(
+                    "Не удалось распознать номер протокола. Введите его вручную и нажмите «Найти»."
+                )
+                return
+
+            self.scan_protocol.setText(candidates[0])
+            for candidate in candidates:
+                matches = self.db.find_archive(candidate)
+                exact_matches = [
+                    row for row in matches
+                    if normalize_protocol(row["protocol"]) == normalize_protocol(candidate)
+                ]
+                if exact_matches:
+                    self.scan_protocol.setText(candidate)
+                    self.search_archive(quiet=True, exact_only=True)
+                    self.ocr_status.setText(
+                        f"Распознан номер {candidate}. Проверьте найденную организацию перед переименованием."
+                    )
+                    return
+
+            self.ocr_status.setText(
+                f"Распознан номер {candidates[0]}, но точная запись в архивном журнале не найдена. "
+                "Проверьте номер или выполните поиск вручную."
+            )
+        except Exception as exc:
+            self.ocr_status.setText(
+                f"Автораспознавание недоступно: {exc}. Вы можете ввести номер протокола вручную."
+            )
+        finally:
+            self._update_scan_button()
+
+    def search_archive(self, quiet=False, exact_only=False):
         protocol = self.scan_protocol.text().strip()
         self.archive_results.clear()
         self.current_archive_record = None
         if not protocol:
-            QMessageBox.warning(self, "Введите номер", "Укажите номер протокола для поиска.")
+            if not quiet:
+                QMessageBox.warning(self, "Введите номер", "Укажите номер протокола для поиска.")
             return
         matches = self.db.find_archive(protocol)
+        if exact_only:
+            matches = [
+                row for row in matches
+                if normalize_protocol(row["protocol"]) == normalize_protocol(protocol)
+            ]
         if not matches:
-            QMessageBox.information(
-                self, "Не найдено",
-                "Совпадений нет. Проверьте, что импортирована актуальная версия архивного журнала."
-            )
+            if not quiet:
+                QMessageBox.information(
+                    self, "Не найдено",
+                    "Совпадений нет. Проверьте, что импортирована актуальная версия архивного журнала."
+                )
             self.archive_detail.setText("Совпадений нет.")
             self._update_scan_button()
             return
