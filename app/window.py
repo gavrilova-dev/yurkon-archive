@@ -977,6 +977,12 @@ class MainWindow(QMainWindow):
         try:
             self.db.update_status(int(record_id), field, stamp)
             row = item.row()
+            if item.column() == 12 and stamp:
+                assembled_item = self.table.item(row, 11)
+                if assembled_item and assembled_item.checkState() != Qt.CheckState.Checked:
+                    self.table.blockSignals(True)
+                    assembled_item.setCheckState(Qt.CheckState.Checked)
+                    self.table.blockSignals(False)
             if item.column() == 12:
                 admin_item = self.table.item(row, 9)
                 old_amount = int(admin_item.text() or 0) if admin_item else 0
