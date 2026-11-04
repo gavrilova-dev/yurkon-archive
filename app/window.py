@@ -6,13 +6,13 @@ import tempfile
 from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
-from PySide6.QtGui import QIntValidator
+from PySide6.QtGui import QIntValidator, QImage, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
-    QGroupBox, QHeaderView, QAbstractItemView,
+    QGroupBox, QHeaderView, QAbstractItemView, QScrollArea,
 )
 
 from app.config import APP_DATA, DATABASE_PATH, INCOMING_FOLDER, READY_FOLDER, ARCHIVE_JOURNAL_DEFAULT
@@ -555,6 +555,8 @@ class MainWindow(QMainWindow):
         self.file_manager = FileManager(INCOMING_FOLDER, READY_FOLDER)
         self.current_pdf = None
         self.current_archive_record = None
+        self.preview_page_index = 0
+        self.preview_page_count = 0
         self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
@@ -654,14 +656,43 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        group = QGroupBox("Новые PDF в папке сканера")
-        group_layout = QVBoxLayout(group)
+        files_group = QGroupBox("Новые PDF в папке сканера")
+        files_layout = QVBoxLayout(files_group)
         self.scan_file_label = QLabel("Новых PDF нет")
         self.scan_queue = QListWidget()
         self.scan_queue.currentItemChanged.connect(self.select_pdf)
-        group_layout.addWidget(self.scan_file_label)
-        group_layout.addWidget(self.scan_queue)
-        layout.addWidget(group)
+        files_layout.addWidget(self.scan_file_label)
+        files_layout.addWidget(self.scan_queue)
+
+        preview_group = QGroupBox("Предпросмотр PDF")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_toolbar = QHBoxLayout()
+        self.preview_prev_button = QPushButton("← Предыдущая")
+        self.preview_prev_button.clicked.connect(self.show_previous_preview_page)
+        self.preview_page_label = QLabel("Страница —")
+        self.preview_page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_next_button = QPushButton("Следующая →")
+        self.preview_next_button.clicked.connect(self.show_next_preview_page)
+        preview_toolbar.addWidget(self.preview_prev_button)
+        preview_toolbar.addStretch()
+        preview_toolbar.addWidget(self.preview_page_label)
+        preview_toolbar.addStretch()
+        preview_toolbar.addWidget(self.preview_next_button)
+        preview_layout.addLayout(preview_toolbar)
+
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image = QLabel("Выберите PDF для просмотра")
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image.setMinimumSize(1, 1)
+        self.preview_scroll.setWidget(self.preview_image)
+        preview_layout.addWidget(self.preview_scroll)
+
+        scan_content = QHBoxLayout()
+        scan_content.addWidget(files_group, 1)
+        scan_content.addWidget(preview_group, 3)
+        layout.addLayout(scan_content, 3)
 
         search_group = QGroupBox("Поиск организации по номеру протокола")
         search_layout = QVBoxLayout(search_group)
@@ -685,7 +716,7 @@ class MainWindow(QMainWindow):
         self.rename_button.clicked.connect(self.move_scanned_pdf)
         self.rename_button.setEnabled(False)
         search_layout.addWidget(self.rename_button)
-        layout.addWidget(search_group)
+        layout.addWidget(search_group, 1)
         return page
 
     def _build_settings_tab(self):
@@ -1062,7 +1093,76 @@ class MainWindow(QMainWindow):
     def select_pdf(self, current, _previous=None):
         if current:
             self.current_pdf = Path(current.data(Qt.ItemDataRole.UserRole))
+            self.preview_page_index = 0
+            self.render_pdf_preview()
+        else:
+            self.current_pdf = None
+            self.clear_pdf_preview()
         self._update_scan_button()
+
+    def clear_pdf_preview(self):
+        self.preview_page_count = 0
+        self.preview_page_index = 0
+        self.preview_image.clear()
+        self.preview_image.setText("Выберите PDF для просмотра")
+        self.preview_page_label.setText("Страница —")
+        self.preview_prev_button.setEnabled(False)
+        self.preview_next_button.setEnabled(False)
+
+    def render_pdf_preview(self):
+        if not self.current_pdf:
+            self.clear_pdf_preview()
+            return
+        try:
+            import fitz
+
+            with fitz.open(str(self.current_pdf)) as document:
+                self.preview_page_count = len(document)
+                if self.preview_page_count == 0:
+                    self.clear_pdf_preview()
+                    self.preview_image.setText("В PDF нет страниц")
+                    return
+                self.preview_page_index = max(
+                    0, min(self.preview_page_index, self.preview_page_count - 1)
+                )
+                pdf_page = document.load_page(self.preview_page_index)
+                available_width = max(300, self.preview_scroll.viewport().width() - 30)
+                scale = min(1.5, available_width / max(1, pdf_page.rect.width))
+                pixmap_data = pdf_page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale), alpha=False
+                )
+                image = QImage(
+                    pixmap_data.samples,
+                    pixmap_data.width,
+                    pixmap_data.height,
+                    pixmap_data.stride,
+                    QImage.Format.Format_RGB888,
+                ).copy()
+                self.preview_image.setPixmap(QPixmap.fromImage(image))
+            self.preview_page_label.setText(
+                f"Страница {self.preview_page_index + 1} из {self.preview_page_count}"
+            )
+            self.preview_prev_button.setEnabled(self.preview_page_index > 0)
+            self.preview_next_button.setEnabled(
+                self.preview_page_index < self.preview_page_count - 1
+            )
+        except Exception as exc:
+            self.preview_page_count = 0
+            self.preview_page_label.setText("Не удалось открыть PDF")
+            self.preview_image.setPixmap(QPixmap())
+            self.preview_image.setText(f"Ошибка предпросмотра:\n{exc}")
+            self.preview_prev_button.setEnabled(False)
+            self.preview_next_button.setEnabled(False)
+
+    def show_previous_preview_page(self):
+        if self.preview_page_index > 0:
+            self.preview_page_index -= 1
+            self.render_pdf_preview()
+
+    def show_next_preview_page(self):
+        if self.preview_page_index < self.preview_page_count - 1:
+            self.preview_page_index += 1
+            self.render_pdf_preview()
 
     def search_archive(self):
         protocol = self.scan_protocol.text().strip()
