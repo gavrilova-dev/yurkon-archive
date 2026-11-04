@@ -577,6 +577,8 @@ class MainWindow(QMainWindow):
         self.preview_page_count = 0
         self.preview_zoom = 1.0
         self.ocr_pdf_path = None
+        self.ocr_retry_path = None
+        self.ocr_retry_count = 0
         self.backup_path = APP_DATA / "backups" / "yurkon_archive_autobackup.sqlite3"
         self._build_ui()
         self.refresh_table()
@@ -1283,11 +1285,39 @@ class MainWindow(QMainWindow):
                 "Проверьте номер или выполните поиск вручную."
             )
         except Exception as exc:
+            pdf_path = str(self.current_pdf) if self.current_pdf else None
+            self.ocr_pdf_path = None
             self.ocr_status.setText(
-                f"Автораспознавание недоступно: {exc}. Вы можете ввести номер протокола вручную."
+                f"Файл пока не готов для распознавания: {exc}. Повторяем попытку…"
             )
+            if pdf_path:
+                if self.ocr_retry_path != pdf_path:
+                    self.ocr_retry_path = pdf_path
+                    self.ocr_retry_count = 0
+                if self.ocr_retry_count < 5:
+                    self.ocr_retry_count += 1
+                    QTimer.singleShot(
+                        1000,
+                        lambda path=pdf_path: self._retry_ocr_when_ready(path),
+                    )
+                else:
+                    self.ocr_status.setText(
+                        f"Не удалось прочитать PDF: {exc}. "
+                        "Проверьте файл или выберите его повторно."
+                    )
+        else:
+            self.ocr_retry_path = None
+            self.ocr_retry_count = 0
         finally:
             self._update_scan_button()
+
+    def _retry_ocr_when_ready(self, pdf_path):
+        if (
+            self.current_pdf
+            and str(self.current_pdf) == pdf_path
+            and self.ocr_pdf_path != pdf_path
+        ):
+            self._recognize_current_pdf()
 
     def search_archive(self, quiet=False, exact_only=False):
         protocol = self.scan_protocol.text().strip()
