@@ -848,9 +848,9 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.warning(
             self,
             "Очистка журнала архива",
-            f"Будет очищен только импортированный справочник архивных дел ({count} записей).\x5cn\x5cn"
+            f"Будет очищен только импортированный справочник архивных дел ({count} записей).\n\n"
             "Основной учёт организаций, партии, суммы, статусы, настройки и PDF-файлы "
-            "не затрагиваются. Перед очисткой будет создана отдельная резервная копия базы.\x5cn\x5cn"
+            "не затрагиваются. Перед очисткой будет создана отдельная резервная копия базы.\n\n"
             "Продолжить?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -866,7 +866,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(
                 self, "Очистка отменена",
-                f"Не удалось создать резервную копию. Данные не изменены.\x5cn\x5cn{exc}",
+                f"Не удалось создать резервную копию. Данные не изменены.\n\n{exc}",
             )
             return
         try:
@@ -877,12 +877,12 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.information(
                 self, "Журнал архива очищен",
-                f"Удалено записей: {deleted}\x5cnРезервная копия: {safety_path}",
+                f"Удалено записей: {deleted}\nРезервная копия: {safety_path}",
             )
         except Exception as exc:
             QMessageBox.critical(
                 self, "Ошибка очистки",
-                f"Не удалось очистить журнал архива. Резервная копия сохранена.\x5cn\x5cn{exc}",
+                f"Не удалось очистить журнал архива. Резервная копия сохранена.\n\n{exc}",
             )
 
     def create_auto_backup(self):
