@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+import sys
 import tempfile
 from openpyxl import load_workbook
 
