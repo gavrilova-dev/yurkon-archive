@@ -12,12 +12,14 @@ class ArchiveImporterTests(unittest.TestCase):
             ws = wb.active
             ws.title = "Вход Архив ИЛ-10"
             ws.append(["Журнал"])
-            ws.append(["№, п/п", "Индекс дела", "Наименование организации", "Номер протокола"])
-            ws.append([1, 2, 3, 4])
-            ws.append([1, "ИЛ-10-0001/2025", "ООО Альфа", "9510/2025"])
+            ws.append(["№, п/п", "Индекс дела", "Наименование организации", "Номер протокола", "ФИО сдавшего дело в архив"])
+            ws.append([1, 2, 3, 4, 5])
+            ws.append([1, "ИЛ-10-0001/2025", "ООО Альфа", "9510/2025", "Кормин М.В."])
+            ws.append([2, "ИЛ-10-0002/2025", "ООО Бета", "9511/2025", "Иванов И.И."])
             wb.save(path)
             rows = read_archive_journal(path)
             self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["organization"], "ООО Альфа")
             self.assertEqual(rows[0]["archive_index"], "ИЛ-10-0001/2025")
             self.assertEqual(rows[0]["protocol"], "9510/2025")
 
@@ -28,9 +30,9 @@ class ArchiveImporterTests(unittest.TestCase):
             ws = wb.active
             ws.title = "Вход Архив ИЛ-10"
             ws.append(["Журнал"])
-            ws.append(["№, п/п", "Индекс дела", "Наименование организации", "Номер протокола"])
-            ws.append([1, "ИЛ-10-0001/2025", "ООО Альфа", "9510/2025"])
-            ws.append([2, "ИЛ-10-0002/2025", "ООО Бета", "9511/2025"])
+            ws.append(["№, п/п", "Индекс дела", "Наименование организации", "Номер протокола", "ФИО сдавшего дело в архив"])
+            ws.append([1, "ИЛ-10-0001/2025", "ООО Альфа", "9510/2025", "Кормин М.В."])
+            ws.append([2, "ИЛ-10-0002/2025", "ООО Бета", "9511/2025", "Кормин М.В."])
             wb.save(path)
             rows = read_archive_journal(path)
             self.assertEqual(len(rows), 2)

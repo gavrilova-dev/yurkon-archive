@@ -441,6 +441,9 @@ class ReportPreviewDialog(QDialog):
                 kind_box.currentIndexChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
             export_button.clicked.connect(lambda _=False, t=report_type: self.export_page(t))
             self.tabs.addTab(page, title)
+        self.tabs.currentChanged.connect(
+            lambda index: self.refresh_page(self.REPORTS[index][0])
+        )
         self.refresh_page("summary")
         self.tabs.setCurrentIndex(0)
 
@@ -625,6 +628,7 @@ class MainWindow(QMainWindow):
         search_row.addWidget(QLabel("Поиск"))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Организация, протокол, исполнитель, месяц, год или индекс дела")
+        self.search.setClearButtonEnabled(True)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.timeout.connect(self.refresh_table)
@@ -649,6 +653,13 @@ class MainWindow(QMainWindow):
             self.filter_boxes[key] = combo
             filter_grid.addWidget(combo, grid_row, group * 2 + 1)
         layout.addLayout(filter_grid)
+
+        filter_actions = QHBoxLayout()
+        reset_filters = QPushButton("Сбросить фильтр")
+        reset_filters.clicked.connect(self.reset_filters)
+        filter_actions.addWidget(reset_filters)
+        filter_actions.addStretch()
+        layout.addLayout(filter_actions)
 
         self.table = QTableWidget(0, len(self.COLUMNS) + 1)
         self.table.setHorizontalHeaderLabels(["ID"] + [item[1] for item in self.COLUMNS])
@@ -875,10 +886,24 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка восстановления", str(exc))
 
+    def reset_filters(self):
+        if hasattr(self, "search"):
+            self.search.clear()
+        for combo in getattr(self, "filter_boxes", {}).values():
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self.refresh_table()
+
     def refresh_table(self, *_):
         if not hasattr(self, "table"):
             return
-        rows = self.db.list_records(self.search.text() if hasattr(self, "search") else "")
+        rows = self.db.list_records()
+        search_text = self.search.text() if hasattr(self, "search") else ""
+        matching_ids = (
+            {record["id"] for record in self.db.list_records(search_text)}
+            if search_text.strip() else None
+        )
         if hasattr(self, "filter_boxes"):
             filter_values = {
                 key: sorted({str(r[key]) for r in rows if r.get(key)})
@@ -933,6 +958,8 @@ class MainWindow(QMainWindow):
                 if ok:
                     filtered.append(record)
             rows = filtered
+        if matching_ids is not None:
+            rows = [record for record in rows if record["id"] in matching_ids]
 
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
