@@ -6,7 +6,7 @@ import tempfile
 from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
-from PySide6.QtGui import QIntValidator, QImage, QPixmap
+from PySide6.QtGui import QIcon, QIntValidator, QImage, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
@@ -571,6 +571,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("YURKON Archive")
+        icon_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+        self.setWindowIcon(QIcon(str(icon_root / "icon.ico")))
         self.resize(1450, 820)
         self.db = Database(DATABASE_PATH)
         self.file_manager = FileManager(INCOMING_FOLDER, READY_FOLDER)
@@ -615,6 +617,7 @@ class MainWindow(QMainWindow):
             ("Удалить", self.delete_record),
             ("Контроль партий", self.manage_batches),
             ("Импорт архива", self.import_archive),
+            ("Очистить журнал архива", self.clear_archive_journal),
             ("Загрузить отчетность", self.import_legacy),
             ("Выгрузить отчёт", self.export_reports),
         ]
@@ -835,6 +838,51 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Суммы для расчётов сохранены.", 5000)
         except Exception as exc:
             QMessageBox.warning(self, "Не удалось сохранить суммы", str(exc))
+
+    def clear_archive_journal(self):
+        count = self.db.archive_count()
+        if count == 0:
+            QMessageBox.information(self, "Журнал архива", "В журнале нет импортированных записей.")
+            return
+        answer = QMessageBox.warning(
+            self,
+            "Очистка журнала архива",
+            f"Будет очищен только импортированный справочник архивных дел ({count} записей).\\n\\n"
+            "Основной учёт организаций, партии, суммы, статусы, настройки и PDF-файлы "
+            "не затрагиваются. Перед очисткой будет создана отдельная резервная копия базы.\\n\\n"
+            "Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.backup_path.parent.mkdir(parents=True, exist_ok=True)
+            safety_path = self.backup_path.with_name(
+                f"yurkon_archive_before_clear_{datetime.now():%Y%m%d_%H%M%S}.sqlite3"
+            )
+            self.db.backup_to(safety_path)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Очистка отменена",
+                f"Не удалось создать резервную копию. Данные не изменены.\\n\\n{exc}",
+            )
+            return
+        try:
+            deleted = self.db.clear_archive_records()
+            self.refresh_table()
+            self.statusBar().showMessage(
+                f"Журнал архива очищен: удалено {deleted} записей. Копия: {safety_path}", 15000
+            )
+            QMessageBox.information(
+                self, "Журнал архива очищен",
+                f"Удалено записей: {deleted}\\nРезервная копия: {safety_path}",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Ошибка очистки",
+                f"Не удалось очистить журнал архива. Резервная копия сохранена.\\n\\n{exc}",
+            )
 
     def create_auto_backup(self):
         try:
