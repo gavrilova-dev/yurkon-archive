@@ -412,6 +412,12 @@ class Database:
                     added += 1
         return {"added": added, "updated": updated, "skipped": skipped}
 
+    def clear_archive_records(self) -> int:
+        """Remove only imported archive-journal rows; preserve all operational data."""
+        with self.connection:
+            cursor = self.connection.execute("DELETE FROM archive_records")
+        return int(cursor.rowcount)
+
     def archive_count(self) -> int:
         return int(self.connection.execute("SELECT COUNT(*) FROM archive_records").fetchone()[0])
 

@@ -151,6 +151,24 @@ class DatabaseTests(unittest.TestCase):
             "primary_rate": 30, "primary_share_rate": 15, "admin_rate": 125
         })
 
+    def test_clear_archive_records_preserves_primary_records_batches_and_settings(self):
+        record_id = self.db.add_record({
+            "executor": "Анна", "month": "ноябрь", "year": 2026,
+            "protocol": "123/2026", "organization": "ООО Основная", "workplaces": 3
+        })
+        self.db.set_setting("custom_setting", "keep")
+        self.db.import_archive_rows([{
+            "archive_index": "ИЛ-10-0001/2026", "organization": "ООО Архив",
+            "protocol": "123/2026", "source_row": 4
+        }])
+        deleted = self.db.clear_archive_records()
+        self.assertEqual(deleted, 1)
+        self.assertEqual(self.db.archive_count(), 0)
+        self.assertEqual(len(self.db.list_records()), 1)
+        self.assertEqual(self.db.get_record(record_id)["organization"], "ООО Основная")
+        self.assertEqual(len(self.db.list_batches()), 1)
+        self.assertEqual(self.db.get_setting("custom_setting"), "keep")
+
     def test_backup_restore_replaces_database_contents(self):
         with tempfile.TemporaryDirectory() as folder:
             backup = Path(folder) / "backup.sqlite3"
