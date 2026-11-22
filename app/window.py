@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+import re
 import sys
 import tempfile
 from openpyxl import load_workbook
@@ -9,7 +10,7 @@ from openpyxl import load_workbook
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
 from PySide6.QtGui import QIcon, QIntValidator, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+    QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QMessageBox, QFileDialog, QComboBox, QSpinBox, QDateEdit,
     QCheckBox, QTextEdit, QListWidget, QListWidgetItem, QInputDialog,
@@ -45,6 +46,13 @@ def _display_date(value):
         return datetime.fromisoformat(str(value)[:10]).strftime("%d.%m.%Y")
     except (ValueError, TypeError):
         return str(value)
+
+
+def make_protocol_filename(protocol, organization):
+    protocol_text = str(protocol or "").strip().replace("/", "-")
+    organization_text = re.sub(r'[\"\'«»“”‘’]', "", str(organization or "")).strip()
+    return " ".join(part for part in (protocol_text, organization_text) if part)
+
 
 
 class OptionalDate(QWidget):
@@ -1041,6 +1049,24 @@ class MainWindow(QMainWindow):
                 if col in (0, 6, 7, 8, 9):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row_num, col, item)
+                if col == 4:
+                    protocol_widget = QWidget(self.table)
+                    protocol_layout = QHBoxLayout(protocol_widget)
+                    protocol_layout.setContentsMargins(3, 0, 2, 0)
+                    protocol_layout.setSpacing(4)
+                    protocol_label = QLabel(str(value if value is not None else ""))
+                    copy_button = QPushButton("⧉")
+                    copy_button.setToolTip("Копировать номер протокола и организацию для имени файла")
+                    copy_button.setAccessibleName("Копировать номер протокола и организацию")
+                    copy_button.setFlat(True)
+                    copy_button.setFixedSize(28, 26)
+                    copy_button.clicked.connect(
+                        lambda _checked=False, p=record["protocol"], o=record["organization"]:
+                            self.copy_protocol_filename(p, o)
+                    )
+                    protocol_layout.addWidget(protocol_label, 1)
+                    protocol_layout.addWidget(copy_button)
+                    self.table.setCellWidget(row_num, col, protocol_widget)
         self.table.blockSignals(False)
         self._visible_admin_total = total_admin
         self.summary.setText(
@@ -1048,6 +1074,11 @@ class MainWindow(QMainWindow):
             f"К получению: {total_fee:,} ₽ · Моя доля: {total_share:,} ₽ · "
             f"Админ. работа: {total_admin:,} ₽".replace(",", " ")
         )
+
+    def copy_protocol_filename(self, protocol, organization):
+        filename = make_protocol_filename(protocol, organization)
+        QApplication.clipboard().setText(filename)
+        self.statusBar().showMessage("Скопировано для имени файла: " + filename, 5000)
 
     def update_status_from_table(self, item):
         if item.column() not in (11, 12, 13):
