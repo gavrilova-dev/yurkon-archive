@@ -523,7 +523,7 @@ class ReportPreviewDialog(QDialog):
             column_offset = 1 if use_checklist else 0
             table.setRowCount(len(visible))
             table.setColumnCount(max_col + column_offset)
-            headers = (["✓"] if use_checklist else []) + [
+            headers = (["Получено"] if use_checklist else []) + [
                 chr(64+c) if c <= 26 else str(c) for c in range(1, max_col + 1)
             ]
             table.setHorizontalHeaderLabels(headers)
@@ -564,7 +564,7 @@ class ReportPreviewDialog(QDialog):
                         item.setFont(font)
                     table.setItem(ri, ci + column_offset, item)
             if use_checklist:
-                table.setColumnWidth(0, 38)
+                table.setColumnWidth(0, 82)
                 self._update_primary_check_progress(checklist_records, checked_ids)
             elif report_type == "manager" and page["progress"]:
                 page["progress"].clear()
@@ -594,7 +594,7 @@ class ReportPreviewDialog(QDialog):
         records = self._current_primary_records() if records is None else records
         ids = [int(r["id"]) for r in records]
         checked_ids = self.db.list_primary_return_checks(ids) if checked_ids is None else checked_ids
-        page["progress"].setText(f"Проверено: {len(checked_ids)} из {len(ids)}")
+        page["progress"].setText(f"Журналы получены: {len(checked_ids)} из {len(ids)}")
         page["reset_checks"].setEnabled(bool(checked_ids))
 
     def on_manager_check_changed(self, item):
