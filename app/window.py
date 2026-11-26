@@ -671,6 +671,10 @@ class MainWindow(QMainWindow):
         reset_filters.clicked.connect(self.reset_filters)
         filter_actions.addWidget(reset_filters)
         filter_actions.addStretch()
+        comment_legend = QLabel("💬 — есть комментарий")
+        comment_legend.setToolTip("У организаций с этим значком заполнено поле комментария.")
+        comment_legend.setStyleSheet("color: #64748b;")
+        filter_actions.addWidget(comment_legend)
         layout.addLayout(filter_actions)
 
         self.table = QTableWidget(0, len(self.COLUMNS) + 1)
@@ -1067,6 +1071,19 @@ class MainWindow(QMainWindow):
                     protocol_layout.addWidget(protocol_label, 1)
                     protocol_layout.addWidget(copy_button)
                     self.table.setCellWidget(row_num, col, protocol_widget)
+                elif col == 5 and str(record.get("notes") or "").strip():
+                    organization_widget = QWidget(self.table)
+                    organization_layout = QHBoxLayout(organization_widget)
+                    organization_layout.setContentsMargins(3, 0, 3, 0)
+                    organization_layout.setSpacing(6)
+                    organization_label = QLabel(str(value if value is not None else ""))
+                    comment_marker = QLabel("💬")
+                    comment_marker.setToolTip("Комментарий: " + str(record["notes"]).strip())
+                    comment_marker.setAccessibleName("Есть комментарий")
+                    comment_marker.setStyleSheet("color: #52758f;")
+                    organization_layout.addWidget(organization_label, 1)
+                    organization_layout.addWidget(comment_marker)
+                    self.table.setCellWidget(row_num, col, organization_widget)
         self.table.blockSignals(False)
         self._visible_admin_total = total_admin
         self.summary.setText(
