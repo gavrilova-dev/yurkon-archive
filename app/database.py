@@ -78,6 +78,10 @@ class Database:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS primary_return_checks (
+            record_id INTEGER PRIMARY KEY REFERENCES primary_records(id) ON DELETE CASCADE,
+            checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         """)
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(primary_records)")}
         if "admin_amount" not in columns:
@@ -437,6 +441,43 @@ class Database:
 
     def list_batches(self) -> list[sqlite3.Row]:
         return list(self.connection.execute("SELECT * FROM batches ORDER BY year DESC, id"))
+
+    def list_primary_return_checks(self, record_ids: list[int] | None = None) -> set[int]:
+        if record_ids is not None:
+            if not record_ids:
+                return set()
+            placeholders = ",".join("?" for _ in record_ids)
+            rows = self.connection.execute(
+                f"SELECT record_id FROM primary_return_checks WHERE record_id IN ({placeholders})",
+                [int(value) for value in record_ids],
+            )
+        else:
+            rows = self.connection.execute("SELECT record_id FROM primary_return_checks")
+        return {int(row["record_id"]) for row in rows}
+
+    def set_primary_return_checked(self, record_id: int, checked: bool) -> None:
+        with self.connection:
+            if checked:
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO primary_return_checks(record_id) VALUES(?)",
+                    (int(record_id),),
+                )
+            else:
+                self.connection.execute(
+                    "DELETE FROM primary_return_checks WHERE record_id=?",
+                    (int(record_id),),
+                )
+
+    def clear_primary_return_checks(self, record_ids: list[int]) -> int:
+        if not record_ids:
+            return 0
+        placeholders = ",".join("?" for _ in record_ids)
+        with self.connection:
+            cursor = self.connection.execute(
+                f"DELETE FROM primary_return_checks WHERE record_id IN ({placeholders})",
+                [int(value) for value in record_ids],
+            )
+        return int(cursor.rowcount)
 
     def update_status(self, record_id: int, field: str, value: str | None) -> None:
         allowed = {"assembled_date", "scanned_date", "yandex_uploaded_date"}
