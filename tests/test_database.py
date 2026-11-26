@@ -169,6 +169,34 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(self.db.list_batches()), 1)
         self.assertEqual(self.db.get_setting("custom_setting"), "keep")
 
+    def test_primary_return_checks_are_persistent_and_can_be_cleared(self):
+        first_id = self.db.add_record({
+            "executor": "Аня", "month": "март", "year": 2026,
+            "protocol": "10/2026", "organization": "ООО Альфа", "workplaces": 1
+        })
+        second_id = self.db.add_record({
+            "executor": "Аня", "month": "март", "year": 2026,
+            "protocol": "11/2026", "organization": "ООО Бета", "workplaces": 1
+        })
+        self.db.set_primary_return_checked(first_id, True)
+        self.assertEqual(
+            self.db.list_primary_return_checks([first_id, second_id]), {first_id}
+        )
+        self.db.set_primary_return_checked(first_id, False)
+        self.db.set_primary_return_checked(second_id, True)
+        self.assertEqual(self.db.list_primary_return_checks(), {second_id})
+        self.assertEqual(self.db.clear_primary_return_checks([second_id]), 1)
+        self.assertEqual(self.db.list_primary_return_checks(), set())
+
+    def test_deleting_primary_record_removes_its_return_check(self):
+        record_id = self.db.add_record({
+            "executor": "Аня", "month": "март", "year": 2026,
+            "protocol": "10/2026", "organization": "ООО Альфа", "workplaces": 1
+        })
+        self.db.set_primary_return_checked(record_id, True)
+        self.db.delete_record(record_id)
+        self.assertEqual(self.db.list_primary_return_checks(), set())
+
     def test_backup_restore_replaces_database_contents(self):
         with tempfile.TemporaryDirectory() as folder:
             backup = Path(folder) / "backup.sqlite3"
