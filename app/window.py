@@ -1125,6 +1125,9 @@ class MainWindow(QMainWindow):
         rates = self.db.get_rates()
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
+            # Удаляем виджет комментария от предыдущего содержимого этой строки.
+            # Иначе после смены фильтра он может остаться поверх другой организации.
+            self.table.removeCellWidget(row_num, 5)
             workplaces = int(record["workplaces"] or 0)
             fee = workplaces * int(record.get("primary_rate") if record.get("primary_rate") is not None else rates["primary_rate"])
             share = workplaces * int(record.get("primary_share_rate") if record.get("primary_share_rate") is not None else rates["primary_share_rate"])
