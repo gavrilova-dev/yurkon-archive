@@ -392,8 +392,9 @@ class ReportPreviewDialog(QDialog):
         ("annual", "Годовой отчет"),
     ]
 
-    def __init__(self, parent, records, batches, years, default_year, rates):
-        super().__init__(parent)
+    def __init__(self, parent, records, batches, years, default_year, rates, database):
+        super().__init__()
+        self.db = database
         self.setWindowTitle("Отчётность")
         self.resize(1450, 850)
         self.records = [dict(r) for r in records]
@@ -429,6 +430,16 @@ class ReportPreviewDialog(QDialog):
                 kind_box.addItem("Первичка", "primary")
                 kind_box.addItem("Административная работа", "admin")
                 controls.addWidget(kind_box)
+                progress_label = QLabel()
+                progress_label.setStyleSheet("color: #526779; font-weight: 600;")
+                controls.addWidget(progress_label)
+                reset_checks = QPushButton("Сбросить отметки")
+                reset_checks.setToolTip("Снять все галочки для выбранной партии")
+                reset_checks.clicked.connect(self.clear_current_primary_checks)
+                controls.addWidget(reset_checks)
+            else:
+                progress_label = None
+                reset_checks = None
             controls.addStretch()
             export_button = QPushButton("Выгрузить этот отчёт")
             controls.addWidget(export_button)
@@ -443,7 +454,10 @@ class ReportPreviewDialog(QDialog):
             self.pages[report_type] = {
                 "year": year_box, "party": party_box, "kind": kind_box,
                 "table": table, "export": export_button,
+                "progress": progress_label, "reset_checks": reset_checks,
             }
+            if report_type == "manager":
+                table.itemChanged.connect(self.on_manager_check_changed)
             year_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
             if party_box:
                 party_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
@@ -503,12 +517,42 @@ class ReportPreviewDialog(QDialog):
                 if report_type == "annual" or any(value not in (None, "") for value in values):
                     visible.append((row_num, values))
             table = page["table"]
+            table.blockSignals(True)
             table.clear()
+            use_checklist = report_type == "manager" and kind == "primary"
+            column_offset = 1 if use_checklist else 0
             table.setRowCount(len(visible))
-            table.setColumnCount(max_col)
-            table.setHorizontalHeaderLabels([chr(64+c) if c <= 26 else str(c) for c in range(1,max_col+1)])
+            table.setColumnCount(max_col + column_offset)
+            headers = (["Получено"] if use_checklist else []) + [
+                chr(64+c) if c <= 26 else str(c) for c in range(1, max_col + 1)
+            ]
+            table.setHorizontalHeaderLabels(headers)
             table.setVerticalHeaderLabels([str(row_num) for row_num, _ in visible])
+            checklist_records = []
+            if use_checklist:
+                checklist_records = sorted(
+                    [r for r in self.records
+                     if int(r.get("year") or year) == year
+                     and f'{r.get("executor") or ""} - {r.get("month") or ""}'.strip(" -").casefold() == party.casefold()],
+                    key=lambda r: str(r.get("protocol") or ""),
+                )
+            checked_ids = self.db.list_primary_return_checks(
+                [int(r["id"]) for r in checklist_records]
+            ) if use_checklist else set()
             for ri, (source_row, values) in enumerate(visible):
+                if use_checklist and 2 <= source_row <= len(checklist_records) + 1:
+                    record = checklist_records[source_row - 2]
+                    check_item = QTableWidgetItem()
+                    check_item.setFlags(
+                        Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable |
+                        Qt.ItemFlag.ItemIsUserCheckable
+                    )
+                    check_item.setCheckState(
+                        Qt.CheckState.Checked if int(record["id"]) in checked_ids
+                        else Qt.CheckState.Unchecked
+                    )
+                    check_item.setData(Qt.ItemDataRole.UserRole, int(record["id"]))
+                    table.setItem(ri, 0, check_item)
                 for ci, value in enumerate(values):
                     if value is None:
                         continue
@@ -518,11 +562,65 @@ class ReportPreviewDialog(QDialog):
                         font = item.font()
                         font.setBold(True)
                         item.setFont(font)
-                    table.setItem(ri, ci, item)
+                    table.setItem(ri, ci + column_offset, item)
+            if use_checklist:
+                table.setColumnWidth(0, 82)
+                self._update_primary_check_progress(checklist_records, checked_ids)
+            elif report_type == "manager" and page["progress"]:
+                page["progress"].clear()
             table.resizeColumnsToContents()
+            if use_checklist:
+                table.setColumnWidth(0, 38)
+            table.blockSignals(False)
             wb.close()
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка предпросмотра", str(exc))
+
+    def _current_primary_records(self):
+        year, party, kind = self._settings("manager")
+        if kind != "primary" or not party:
+            return []
+        return sorted(
+            [r for r in self.records
+             if int(r.get("year") or year) == year
+             and f'{r.get("executor") or ""} - {r.get("month") or ""}'.strip(" -").casefold() == party.casefold()],
+            key=lambda r: str(r.get("protocol") or ""),
+        )
+
+    def _update_primary_check_progress(self, records=None, checked_ids=None):
+        page = self.pages["manager"]
+        if not page["progress"]:
+            return
+        records = self._current_primary_records() if records is None else records
+        ids = [int(r["id"]) for r in records]
+        checked_ids = self.db.list_primary_return_checks(ids) if checked_ids is None else checked_ids
+        page["progress"].setText(f"Журналы получены: {len(checked_ids)} из {len(ids)}")
+        page["reset_checks"].setEnabled(bool(checked_ids))
+
+    def on_manager_check_changed(self, item):
+        if item.column() != 0 or not item.data(Qt.ItemDataRole.UserRole):
+            return
+        record_id = int(item.data(Qt.ItemDataRole.UserRole))
+        self.db.set_primary_return_checked(
+            record_id, item.checkState() == Qt.CheckState.Checked
+        )
+        self._update_primary_check_progress()
+
+    def clear_current_primary_checks(self):
+        records = self._current_primary_records()
+        if not records:
+            return
+        answer = QMessageBox.question(
+            self, "Сброс отметок",
+            "Снять все отметки проверки первички для выбранной партии?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        ids = [int(r["id"]) for r in records]
+        self.db.clear_primary_return_checks(ids)
+        self.refresh_page("manager")
 
     def export_page(self, report_type):
         year, party, kind = self._settings(report_type)
@@ -671,6 +769,10 @@ class MainWindow(QMainWindow):
         reset_filters.clicked.connect(self.reset_filters)
         filter_actions.addWidget(reset_filters)
         filter_actions.addStretch()
+        comment_legend = QLabel("💬 — есть комментарий")
+        comment_legend.setToolTip("У организаций с этим значком заполнено поле комментария.")
+        comment_legend.setStyleSheet("color: #64748b;")
+        filter_actions.addWidget(comment_legend)
         layout.addLayout(filter_actions)
 
         self.table = QTableWidget(0, len(self.COLUMNS) + 1)
@@ -1023,6 +1125,9 @@ class MainWindow(QMainWindow):
         rates = self.db.get_rates()
         total_workplaces = total_fee = total_share = total_admin = 0
         for row_num, record in enumerate(rows):
+            # Удаляем виджет комментария от предыдущего содержимого этой строки.
+            # Иначе после смены фильтра он может остаться поверх другой организации.
+            self.table.removeCellWidget(row_num, 5)
             workplaces = int(record["workplaces"] or 0)
             fee = workplaces * int(record.get("primary_rate") if record.get("primary_rate") is not None else rates["primary_rate"])
             share = workplaces * int(record.get("primary_share_rate") if record.get("primary_share_rate") is not None else rates["primary_share_rate"])
@@ -1067,6 +1172,19 @@ class MainWindow(QMainWindow):
                     protocol_layout.addWidget(protocol_label, 1)
                     protocol_layout.addWidget(copy_button)
                     self.table.setCellWidget(row_num, col, protocol_widget)
+                elif col == 5 and str(record.get("notes") or "").strip():
+                    organization_widget = QWidget(self.table)
+                    organization_layout = QHBoxLayout(organization_widget)
+                    organization_layout.setContentsMargins(3, 0, 3, 0)
+                    organization_layout.setSpacing(6)
+                    organization_label = QLabel(str(value if value is not None else ""))
+                    comment_marker = QLabel("💬")
+                    comment_marker.setToolTip("Комментарий: " + str(record["notes"]).strip())
+                    comment_marker.setAccessibleName("Есть комментарий")
+                    comment_marker.setStyleSheet("color: #52758f;")
+                    organization_layout.addWidget(organization_label, 1)
+                    organization_layout.addWidget(comment_marker)
+                    self.table.setCellWidget(row_num, col, organization_widget)
         self.table.blockSignals(False)
         self._visible_admin_total = total_admin
         self.summary.setText(
@@ -1223,7 +1341,7 @@ class MainWindow(QMainWindow):
         current_filter = self.filter_boxes["year"].currentData()
         default_year = int(current_filter) if current_filter and str(current_filter).isdigit() and int(current_filter) in years else years[0]
         batches = [dict(b) for b in self.db.list_batches()]
-        preview = ReportPreviewDialog(self, records, batches, years, default_year, self.db.get_rates())
+        preview = ReportPreviewDialog(self, records, batches, years, default_year, self.db.get_rates(), self.db)
         preview.exec()
 
     def refresh_scan_queue(self):
