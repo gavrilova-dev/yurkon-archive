@@ -663,8 +663,9 @@ class ReportPreviewDialog(QDialog):
         index = page["search_index"]
         row = matches[index]
         table = page["table"]
+        # Keep the find result as a background highlight, not a row selection.
+        # This leaves the vertical header unselected; manual clicks still select normally.
         table.clearSelection()
-        table.selectRow(row)
         table.scrollToItem(table.item(row, 0) or table.item(row, 1))
         page["search_count"].setText(f"{index + 1} из {len(matches)}")
 
