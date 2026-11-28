@@ -633,6 +633,8 @@ class ReportPreviewDialog(QDialog):
                 organization_item = table.item(row, offset + 1)
                 protocol = protocol_item.text() if protocol_item else ""
                 organization = organization_item.text() if organization_item else ""
+                if protocol.strip().casefold() == "итого":
+                    continue
                 if protocol.casefold().find(query) >= 0 or organization.casefold().find(query) >= 0:
                     matches.append(row)
                     for column in range(table.columnCount()):
@@ -652,8 +654,6 @@ class ReportPreviewDialog(QDialog):
                 page["search_count"].clear()
         page["search_prev"].setEnabled(len(matches) > 1)
         page["search_next"].setEnabled(len(matches) > 1)
-        if matches:
-            page["search_count"].setText(f"{len(matches)} совп.")
 
     def _focus_manager_search_match(self):
         page = self.pages["manager"]
