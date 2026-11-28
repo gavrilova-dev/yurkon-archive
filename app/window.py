@@ -8,7 +8,7 @@ import tempfile
 from openpyxl import load_workbook
 
 from PySide6.QtCore import Qt, QTimer, QDate, Signal
-from PySide6.QtGui import QIcon, QIntValidator, QImage, QPixmap
+from PySide6.QtGui import QIcon, QIntValidator, QImage, QPixmap, QColor, QBrush, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
@@ -433,6 +433,22 @@ class ReportPreviewDialog(QDialog):
                 progress_label = QLabel()
                 progress_label.setStyleSheet("color: #526779; font-weight: 600;")
                 controls.addWidget(progress_label)
+                search_box = QLineEdit()
+                search_box.setPlaceholderText("Поиск по протоколу или организации…")
+                search_box.setClearButtonEnabled(True)
+                search_box.setMaximumWidth(250)
+                controls.addWidget(search_box)
+                search_prev = QPushButton("↑")
+                search_prev.setToolTip("Предыдущее совпадение")
+                search_prev.setEnabled(False)
+                controls.addWidget(search_prev)
+                search_next = QPushButton("↓")
+                search_next.setToolTip("Следующее совпадение")
+                search_next.setEnabled(False)
+                controls.addWidget(search_next)
+                search_count = QLabel("")
+                search_count.setMinimumWidth(90)
+                controls.addWidget(search_count)
                 reset_checks = QPushButton("Сбросить отметки")
                 reset_checks.setToolTip("Снять все галочки для выбранной партии")
                 reset_checks.clicked.connect(self.clear_current_primary_checks)
@@ -440,6 +456,10 @@ class ReportPreviewDialog(QDialog):
             else:
                 progress_label = None
                 reset_checks = None
+                search_box = None
+                search_prev = None
+                search_next = None
+                search_count = None
             controls.addStretch()
             export_button = QPushButton("Выгрузить этот отчёт")
             controls.addWidget(export_button)
@@ -455,9 +475,18 @@ class ReportPreviewDialog(QDialog):
                 "year": year_box, "party": party_box, "kind": kind_box,
                 "table": table, "export": export_button,
                 "progress": progress_label, "reset_checks": reset_checks,
+                "search": search_box, "search_prev": search_prev,
+                "search_next": search_next, "search_count": search_count,
+                "search_matches": [], "search_index": -1, "search_originals": {},
             }
             if report_type == "manager":
                 table.itemChanged.connect(self.on_manager_check_changed)
+                search_box.textChanged.connect(self.search_manager_table)
+                search_prev.clicked.connect(lambda _=False: self.navigate_manager_search(-1))
+                search_next.clicked.connect(lambda _=False: self.navigate_manager_search(1))
+                shortcut = QShortcut(QKeySequence.StandardKey.Find, page)
+                shortcut.activated.connect(lambda box=search_box: (box.setFocus(), box.selectAll()))
+                page.manager_search_shortcut = shortcut
             year_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
             if party_box:
                 party_box.currentTextChanged.connect(lambda _=None, t=report_type: self.refresh_page(t))
@@ -517,6 +546,7 @@ class ReportPreviewDialog(QDialog):
                 if report_type == "annual" or any(value not in (None, "") for value in values):
                     visible.append((row_num, values))
             table = page["table"]
+            self._clear_manager_search_highlights()
             table.blockSignals(True)
             table.clear()
             use_checklist = report_type == "manager" and kind == "primary"
@@ -573,8 +603,79 @@ class ReportPreviewDialog(QDialog):
                 table.setColumnWidth(0, 38)
             table.blockSignals(False)
             wb.close()
+            if report_type == "manager":
+                self.search_manager_table()
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка предпросмотра", str(exc))
+
+    def _clear_manager_search_highlights(self):
+        page = self.pages.get("manager")
+        if not page:
+            return
+        table = page["table"]
+        for (row, column), background in page["search_originals"].items():
+            item = table.item(row, column)
+            if item is not None:
+                item.setBackground(background)
+        page["search_originals"].clear()
+
+    def search_manager_table(self, *_):
+        page = self.pages["manager"]
+        table = page["table"]
+        self._clear_manager_search_highlights()
+        query = page["search"].text().strip().casefold()
+        matches = []
+        if query:
+            # In the manager report, the first two columns are protocol and organization.
+            offset = 1 if page["kind"].currentData() == "primary" else 0
+            for row in range(1, table.rowCount()):
+                protocol_item = table.item(row, offset)
+                organization_item = table.item(row, offset + 1)
+                protocol = protocol_item.text() if protocol_item else ""
+                organization = organization_item.text() if organization_item else ""
+                if protocol.strip().casefold() == "итого":
+                    continue
+                if protocol.casefold().find(query) >= 0 or organization.casefold().find(query) >= 0:
+                    matches.append(row)
+                    for column in range(table.columnCount()):
+                        item = table.item(row, column)
+                        if item is not None:
+                            page["search_originals"][(row, column)] = QBrush(item.background())
+                            item.setBackground(QColor("#FFF2A8"))
+        page["search_matches"] = matches
+        page["search_index"] = 0 if matches else -1
+        if matches:
+            self._focus_manager_search_match()
+        else:
+            table.clearSelection()
+            if query:
+                page["search_count"].setText("Не найдено")
+            else:
+                page["search_count"].clear()
+        page["search_prev"].setEnabled(len(matches) > 1)
+        page["search_next"].setEnabled(len(matches) > 1)
+
+    def _focus_manager_search_match(self):
+        page = self.pages["manager"]
+        matches = page["search_matches"]
+        if not matches:
+            return
+        index = page["search_index"]
+        row = matches[index]
+        table = page["table"]
+        # Keep the find result as a background highlight, not a row selection.
+        # This leaves the vertical header unselected; manual clicks still select normally.
+        table.clearSelection()
+        table.scrollToItem(table.item(row, 0) or table.item(row, 1))
+        page["search_count"].setText(f"{index + 1} из {len(matches)}")
+
+    def navigate_manager_search(self, direction):
+        page = self.pages["manager"]
+        matches = page["search_matches"]
+        if not matches:
+            return
+        page["search_index"] = (page["search_index"] + direction) % len(matches)
+        self._focus_manager_search_match()
 
     def _current_primary_records(self):
         year, party, kind = self._settings("manager")
